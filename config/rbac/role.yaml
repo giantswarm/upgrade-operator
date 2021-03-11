@@ -1,0 +1,77 @@
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: upgrade-operator
+rules:
+- apiGroups:
+  - cluster.x-k8s.io
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - clusters
+  - clusters/status
+  - azureclusters
+  - azureclusters/status
+  - awsclusters
+  - awsclusters/status
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - azuremachinetemplates
+  - azuremachinetemplates/status
+  - awsmachinetemplates
+  - awsmachinetemplates/status
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - controlplane.cluster.x-k8s.io
+  resources:
+  - kubeadmcontrolplanes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - exp.cluster.x-k8s.io
+  resources:
+  - machinepools
+  - machinepools/status
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - exp.infrastructure.cluster.x-k8s.io
+  resources:
+  - azuremachinepools
+  - azuremachinepools/status
+  - awsmachinepools
+  - awsmachinepools/status
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - release.giantswarm.io
+  resources:
+  - releases
+  verbs:
+  - get
+  - list

@@ -1,0 +1,7 @@
+domain: giantswarm.io
+repo: github.com/giantswarm/upgrade-operator
+resources:
+- group: webapp
+  kind: Guestbook
+  version: v1
+version: "2"
