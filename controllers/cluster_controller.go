@@ -24,14 +24,12 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/reference"
-	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
+	"k8s.io/apiserver/pkg/storage/names"
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/controllers/external"
-	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
+	capikcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	capiexp "sigs.k8s.io/cluster-api/exp/api/v1alpha3"
 	capiconditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -55,8 +53,16 @@ var (
 		"AWSMachinePool":   capaReleaseComponent,
 	}
 	KindToMachineImagePath = map[string]string{
-		"AzureMachinePool": "spec.template.image.marketplace.sku",
-		"AWSMachinePool":   "spec.template.image.marketplace.sku",
+		"AzureMachinePool":     "spec.template.image.marketplace.sku",
+		"AzureMachineTemplate": "spec.template.spec.image.marketplace.sku",
+		"AWSMachinePool":       "spec.template.image.marketplace.sku",
+		"AWSMachineTemplate":   "spec.template.image.marketplace.sku",
+	}
+	MachineImagesByK8sVersion = map[string]string{
+		"v1.18.2":  "k8s-1dot18dot2-ubuntu",
+		"v1.18.14": "k8s-1dot18dot14-ubuntu",
+		"v1.18.15": "k8s-1dot18dot15-ubuntu",
+		"v1.18.16": "k8s-1dot18dot16-ubuntu",
 	}
 )
 
@@ -67,12 +73,15 @@ type ClusterReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=webapp.giantswarm.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=webapp.giantswarm.io,resources=clusters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io;infrastructure.cluster.x-k8s.io,resources=clusters;clusters/status;awsclusters;awsclusters/status;awsmachinetemplates;azureclusters;azureclusters/status;azuremachinetemplates,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=awsmachinetemplates;azuremachinetemplates,verbs=create
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=exp.infrastructure.cluster.x-k8s.io;exp.cluster.x-k8s.io,resources=machinepools;machinepools/status;awsmachinepools;awsmachinepools/status;azuremachinepools;azuremachinepools/status,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=release.giantswarm.io,resources=releases,verbs=get;list;watch
 
 func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	_ = r.Log.WithValues("cluster", req.NamespacedName)
+	log := r.Log.WithValues("cluster", req.NamespacedName)
 
 	cluster := &capi.Cluster{}
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, cluster)
@@ -80,16 +89,10 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to get reconciled Cluster %q", req.Name)
 	}
 
-	controlplane := &kcp.KubeadmControlPlane{}
-	err = r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Spec.ControlPlaneRef.Namespace, Name: cluster.Spec.ControlPlaneRef.Name}, controlplane)
+	kcp := &capikcp.KubeadmControlPlane{}
+	err = r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Spec.ControlPlaneRef.Namespace, Name: cluster.Spec.ControlPlaneRef.Name}, kcp)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to get KubeadmControlPlane %q referenced by Cluster %q", cluster.Spec.ControlPlaneRef.Name, req.Name)
-	}
-
-	cpMachineTemplate := &capz.AzureMachineTemplate{}
-	err = r.Client.Get(ctx, client.ObjectKey{Namespace: controlplane.Spec.InfrastructureTemplate.Namespace, Name: controlplane.Spec.InfrastructureTemplate.Name}, cpMachineTemplate)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to get AzureMachineTemplate %q referenced by KubeadmControlPlane %q", controlplane.Spec.InfrastructureTemplate.Name, controlplane.Name)
 	}
 
 	// Fetch Release to know the expected version of different components that will be used as labels.
@@ -100,7 +103,6 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
 	expectedCACPVersion := getComponentVersion(giantswarmRelease, cacpReleaseComponent)
-	expectedImage := getComponentVersion(giantswarmRelease, "image")
 
 	// Update Cluster label with CAPI release number.
 	cluster.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
@@ -129,37 +131,37 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	// Update KubeadmControlPlane label with CACP release number.
 	//controlPlaneNodesWillBeRolled := false
 	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
-	if expectedK8sVersion != controlplane.Spec.Version {
-		//controlPlaneNodesWillBeRolled = true
-		controlplane.Spec.Version = expectedK8sVersion
+	if expectedK8sVersion != kcp.Spec.Version {
+		log.Info("Current k8s version doesn't match expected version", "current", kcp.Spec.Version, "expected", expectedK8sVersion)
+		log.Info("Cloning infrastructure template and changing its machine image")
 
-		newAzureMachineTemplate := &capz.AzureMachineTemplate{
-			ObjectMeta: v1.ObjectMeta{
-				Namespace:   cpMachineTemplate.Namespace,
-				Name:        MachineTemplateNameFromCluster(cluster, expectedK8sVersion),
-				Labels:      cpMachineTemplate.Labels,
-				Annotations: cpMachineTemplate.Annotations,
-			},
-			Spec: cpMachineTemplate.Spec,
-		}
-		newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU = expectedImage
-		err = r.Client.Create(ctx, newAzureMachineTemplate)
+		// Clone infrastructure machine template to new object.
+		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, kcp)
 		if err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to create AzureMachineTemplate %q based on AzureMachineTemplate %q used by KubeadmControlPlane %q", newAzureMachineTemplate.Name, cpMachineTemplate.Name, controlplane.Name)
+			return ctrl.Result{}, errors.Wrapf(err, "failed to build infrastructure template from %q", kcp.Spec.InfrastructureTemplate.Name)
 		}
-		newAzureMachineTemplateReference, err := reference.GetReference(r.Scheme, newAzureMachineTemplate)
-		if err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to build ObjectReference for AzureMachineTemplate %q", newAzureMachineTemplate.Name)
+
+		// Update machine template machine image to upgrade k8s or the OS.
+		if err := unstructured.SetNestedField(newInfrastructureMachineTemplate.Object, MachineImagesByK8sVersion[expectedK8sVersion], strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...); err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed to set infrastructure template %q image to %q", kcp.Spec.InfrastructureTemplate.Name, MachineImagesByK8sVersion[expectedK8sVersion])
 		}
-		controlplane.Spec.InfrastructureTemplate = *newAzureMachineTemplateReference
+
+		// Create cloned object.
+		if err := r.Client.Create(ctx, newInfrastructureMachineTemplate); err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed to clone infrastructure template from %q to %q used by KubeadmControlPlane %q", kcp.Spec.InfrastructureTemplate.Name, newInfrastructureMachineTemplate.GetName(), kcp.Name)
+		}
+
+		//controlPlaneNodesWillBeRolled = true
+		kcp.Spec.InfrastructureTemplate.Name = newInfrastructureMachineTemplate.GetName()
+		kcp.Spec.Version = expectedK8sVersion
 	}
 
-	controlplane.Labels[CAPIWatchFilterLabel] = expectedCACPVersion
-	err = r.Client.Update(ctx, controlplane)
+	kcp.Labels[CAPIWatchFilterLabel] = expectedCACPVersion
+	err = r.Client.Update(ctx, kcp)
 	if apierrors.IsConflict(err) {
 		return ctrl.Result{}, nil
 	} else if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to update KubeadmControlPlane %q", controlplane.Name)
+		return ctrl.Result{}, errors.Wrapf(err, "failed to update KubeadmControlPlane %q", kcp.Name)
 	}
 
 	// If control plane nodes will be rolled, let's return so that status and
@@ -190,6 +192,28 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func (r *ClusterReconciler) CloneTemplate(ctx context.Context, kcp *capikcp.KubeadmControlPlane) (*unstructured.Unstructured, error) {
+	infrastructureMachineTemplate, err := external.Get(ctx, r.Client, &kcp.Spec.InfrastructureTemplate, kcp.Namespace)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get infrastructure template %q referenced by KubeadmControlPlane %q", kcp.Spec.InfrastructureTemplate.Name, kcp.Name)
+	}
+
+	to := &unstructured.Unstructured{Object: infrastructureMachineTemplate.Object}
+	to.SetName(names.SimpleNameGenerator.GenerateName(infrastructureMachineTemplate.GetName() + "-"))
+	to.SetResourceVersion("")
+	to.SetFinalizers(nil)
+	to.SetUID("")
+	to.SetSelfLink("")
+	to.SetNamespace(infrastructureMachineTemplate.GetNamespace())
+	to.SetAnnotations(infrastructureMachineTemplate.GetAnnotations())
+	to.SetLabels(infrastructureMachineTemplate.GetLabels())
+	to.SetOwnerReferences(infrastructureMachineTemplate.GetOwnerReferences())
+	to.SetAPIVersion(infrastructureMachineTemplate.GetAPIVersion())
+	to.SetKind(infrastructureMachineTemplate.GetKind())
+
+	return to, nil
+}
+
 // getSortedClusterMachinePools returns the MachinePools that belong to the given Cluster.
 // TODO: Allow users to sort the MachinePools by some priority label on them.
 func (r *ClusterReconciler) getSortedClusterMachinePools(ctx context.Context, cluster *capi.Cluster) ([]capiexp.MachinePool, error) {
@@ -206,7 +230,7 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 	logger := r.Log.WithValues("cluster", cluster.Name)
 
 	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
-	expectedImage := getComponentVersion(giantswarmRelease, "image")
+	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
 
 	clusterMachinePools, err := r.getSortedClusterMachinePools(ctx, cluster)
 	if err != nil {
@@ -220,7 +244,7 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 		if !isReady(&machinePool) {
 			logger.Info("The MachinePool %q is not ready. Let's wait before trying to continue upgrading workers")
 			return nil
-		} else if isMachinePoolOutdated(machinePool, expectedCAPIVersion) {
+		} else if machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
 			machinePool.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
 			err = r.Client.Update(ctx, &machinePool)
 			if err != nil {
@@ -238,8 +262,8 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 			//}
 
 			// Update node pool machine image to upgrade k8s or the OS.
-			if err := unstructured.SetNestedField(infraMachinePool.Object, expectedImage, strings.Split(KindToMachineImagePath[machinePool.Spec.Template.Spec.InfrastructureRef.Kind], ".")...); err != nil {
-				return errors.Wrapf(err, "failed to set infra MachinePool %q image to %q", machinePool.Spec.Template.Spec.InfrastructureRef.Name, expectedImage)
+			if err := unstructured.SetNestedField(infraMachinePool.Object, MachineImagesByK8sVersion[expectedK8sVersion], strings.Split(KindToMachineImagePath[machinePool.Spec.Template.Spec.InfrastructureRef.Kind], ".")...); err != nil {
+				return errors.Wrapf(err, "failed to set infra MachinePool %q image to %q", machinePool.Spec.Template.Spec.InfrastructureRef.Name, MachineImagesByK8sVersion[expectedK8sVersion])
 			}
 
 			setCAPIWatchFilterLabel(infraMachinePool, giantswarmRelease)
@@ -257,10 +281,6 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 
 func isReady(obj capiconditions.Getter) bool {
 	return capiconditions.IsTrue(obj, capi.ReadyCondition)
-}
-
-func isMachinePoolOutdated(machinePool capiexp.MachinePool, expectedVersion string) bool {
-	return machinePool.Labels[CAPIWatchFilterLabel] != expectedVersion
 }
 
 func getGiantSwarmRelease(ctx context.Context, ctrlClient client.Client, cluster *capi.Cluster) (*releaseapiextensions.Release, error) {
@@ -286,7 +306,7 @@ func getComponentVersionForInfraReference(release *releaseapiextensions.Release,
 func getComponentVersion(release *releaseapiextensions.Release, componentName string) string {
 	for _, component := range release.Spec.Components {
 		if component.Name == componentName {
-			return component.Version
+			return fmt.Sprintf("v%s", component.Version)
 		}
 	}
 
@@ -302,8 +322,8 @@ func setCAPIWatchFilterLabel(infraReference *unstructured.Unstructured, release 
 	)
 }
 
-func MachineTemplateNameFromCluster(cluster *capi.Cluster, k8sVersion string) string {
-	return fmt.Sprintf("%s-control-plane-%s", cluster.Name, strings.ReplaceAll(k8sVersion, ".", "-"))
+func MachineTemplateNameFromCluster(cluster *capi.Cluster, k8sVersion, osVersion string) string {
+	return fmt.Sprintf("%s-control-plane-k8s-%s-flatcar-%s", cluster.Name, strings.ReplaceAll(k8sVersion, ".", "dot"), strings.ReplaceAll(osVersion, ".", "dot"))
 }
 
 // merge returns a new map with values from both input maps

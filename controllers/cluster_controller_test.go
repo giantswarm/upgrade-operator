@@ -57,9 +57,9 @@ func TestName(t *testing.T) {
 		Spec: releaseapiextensions.ReleaseSpec{
 			Components: []releaseapiextensions.ReleaseSpecComponent{
 				{Name: "kubernetes", Version: "1.18.14"},
-				{Name: capiReleaseComponent, Version: "v0.3.14"},
-				{Name: cacpReleaseComponent, Version: "v0.3.14"},
-				{Name: capzReleaseComponent, Version: "v0.4.12"},
+				{Name: capiReleaseComponent, Version: "0.3.14"},
+				{Name: cacpReleaseComponent, Version: "0.3.14"},
+				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "k8s-1dot18dot14-ubuntu"},
 			},
 		},
@@ -271,11 +271,11 @@ func TestName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reconciledControlplane.Spec.Version != "1.18.14" {
+	if reconciledControlplane.Spec.Version != "v1.18.14" {
 		t.Fatalf("Kubeadmcontrolplane.Spec.Version uses wrong k8s version, got %q, expected %q", reconciledControlplane.Spec.Version, "1.18.14")
 	}
 	if reconciledControlplane.Labels[CAPIWatchFilterLabel] != "v0.3.14" {
-		t.Fatalf("Kubeadmcontrolplane label %q is wrong, got %q, expected %q", cacpReleaseComponent, reconciledControlplane.Labels[cacpReleaseComponent], "v0.3.14")
+		t.Fatalf("Kubeadmcontrolplane label %q is wrong, got %q, expected %q", CAPIWatchFilterLabel, reconciledControlplane.Labels[CAPIWatchFilterLabel], "v0.3.14")
 	}
 
 	// Assert AzureMachineTemplate used by KubeadmControlPlane uses right machine image.
