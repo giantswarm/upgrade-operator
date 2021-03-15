@@ -58,11 +58,15 @@ var (
 		"AWSMachinePool":       "spec.template.image.marketplace.sku",
 		"AWSMachineTemplate":   "spec.template.image.marketplace.sku",
 	}
+	KindToK8sProviderFile = map[string]string{
+		"AzureMachineTemplate": "%s-azure-json",
+		"AWSMachineTemplate":   "%s-aws-json",
+	}
 	MachineImagesByK8sVersion = map[string]string{
-		"v1.18.2":  "k8s-1dot18dot2-ubuntu",
-		"v1.18.14": "k8s-1dot18dot14-ubuntu",
-		"v1.18.15": "k8s-1dot18dot15-ubuntu",
-		"v1.18.16": "k8s-1dot18dot16-ubuntu",
+		"v1.18.2":  "k8s-1dot18dot2-ubuntu-1804",
+		"v1.18.14": "k8s-1dot18dot14-ubuntu-1804",
+		"v1.18.15": "k8s-1dot18dot15-ubuntu-1804",
+		"v1.18.16": "k8s-1dot18dot16-ubuntu-1804",
 	}
 )
 
@@ -132,6 +136,8 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	//controlPlaneNodesWillBeRolled := false
 	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
 	if expectedK8sVersion != kcp.Spec.Version {
+		//controlPlaneNodesWillBeRolled = true
+
 		log.Info("Current k8s version doesn't match expected version", "current", kcp.Spec.Version, "expected", expectedK8sVersion)
 		log.Info("Cloning infrastructure template and changing its machine image")
 
@@ -151,7 +157,15 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			return ctrl.Result{}, errors.Wrapf(err, "failed to clone infrastructure template from %q to %q used by KubeadmControlPlane %q", kcp.Spec.InfrastructureTemplate.Name, newInfrastructureMachineTemplate.GetName(), kcp.Name)
 		}
 
-		//controlPlaneNodesWillBeRolled = true
+		// When upgrading the k8s cluster we need to update
+		// * Name of the secret used as source for the k8s provider config file
+		// * Reference to the infrastructure machine template.
+		// * K8s version in the control plane object.
+		for _, file := range kcp.Spec.KubeadmConfigSpec.Files {
+			if file.ContentFrom.Secret.Name == fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], kcp.Spec.InfrastructureTemplate.Name) {
+				file.ContentFrom.Secret.Name = fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], newInfrastructureMachineTemplate.GetName())
+			}
+		}
 		kcp.Spec.InfrastructureTemplate.Name = newInfrastructureMachineTemplate.GetName()
 		kcp.Spec.Version = expectedK8sVersion
 	}
@@ -199,7 +213,7 @@ func (r *ClusterReconciler) CloneTemplate(ctx context.Context, kcp *capikcp.Kube
 	}
 
 	to := &unstructured.Unstructured{Object: infrastructureMachineTemplate.Object}
-	to.SetName(names.SimpleNameGenerator.GenerateName(infrastructureMachineTemplate.GetName() + "-"))
+	to.SetName(names.SimpleNameGenerator.GenerateName(kcp.Name + "-"))
 	to.SetResourceVersion("")
 	to.SetFinalizers(nil)
 	to.SetUID("")

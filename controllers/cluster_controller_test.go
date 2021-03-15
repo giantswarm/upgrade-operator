@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"github.com/Azure/go-autorest/autorest/to"
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	apiextensionslabel "github.com/giantswarm/apiextensions/pkg/label"
@@ -13,6 +14,7 @@ import (
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	capiexp "sigs.k8s.io/cluster-api/exp/api/v1alpha3"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -60,7 +62,7 @@ func TestName(t *testing.T) {
 				{Name: capiReleaseComponent, Version: "0.3.14"},
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
-				{Name: "image", Version: "k8s-1dot18dot14-ubuntu"},
+				{Name: "image", Version: "k8s-1dot18dot14-ubuntu-1804"},
 			},
 		},
 	}
@@ -100,6 +102,13 @@ func TestName(t *testing.T) {
 			Replicas:               to.Int32Ptr(1),
 			Version:                "v1.18.2",
 			InfrastructureTemplate: *azureMachineTemplateReference,
+			KubeadmConfigSpec: v1alpha3.KubeadmConfigSpec{
+				Files: []v1alpha3.File{
+					{
+						ContentFrom: &v1alpha3.FileSource{Secret: v1alpha3.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
+					},
+				},
+			},
 		},
 	}
 
@@ -278,14 +287,25 @@ func TestName(t *testing.T) {
 		t.Fatalf("Kubeadmcontrolplane label %q is wrong, got %q, expected %q", CAPIWatchFilterLabel, reconciledControlplane.Labels[CAPIWatchFilterLabel], "v0.3.14")
 	}
 
+	foundProviderFile := false
+	expectedProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
+	for _, file := range reconciledControlplane.Spec.KubeadmConfigSpec.Files {
+		if file.ContentFrom.Secret.Name == expectedProviderFile {
+			foundProviderFile = true
+		}
+	}
+	if !foundProviderFile {
+		t.Fatalf("None of the defined files match the infrastructure machine template name. The name of the provider file needs to match the infrastructure machine template name, got these files %v, expected name %q", reconciledControlplane.Spec.KubeadmConfigSpec.Files, expectedProviderFile)
+	}
+
 	// Assert AzureMachineTemplate used by KubeadmControlPlane uses right machine image.
 	newAzureMachineTemplate := &capz.AzureMachineTemplate{}
 	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledControlplane.Spec.InfrastructureTemplate.Namespace, Name: reconciledControlplane.Spec.InfrastructureTemplate.Name}, newAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU != "k8s-1dot18dot14-ubuntu" {
-		t.Fatalf("AzureMachineTemplate %q image is wrong, got %q, expected %q", newAzureMachineTemplate.Name, newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, "k8s-1dot18dot14-ubuntu")
+	if newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU != "k8s-1dot18dot14-ubuntu-1804" {
+		t.Fatalf("AzureMachineTemplate %q image is wrong, got %q, expected %q", newAzureMachineTemplate.Name, newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, "k8s-1dot18dot14-ubuntu-1804")
 	}
 
 	// Assert CAPI CR's are labeled correctly.
@@ -333,7 +353,7 @@ func TestName(t *testing.T) {
 	}
 
 	// Assert AzureMachinePool uses the right image.
-	if reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU != "k8s-1dot18dot14-ubuntu" {
-		t.Fatalf("AzureMachinePool %q image is wrong, got %q, expected %q", reconciledAzureMachinePool1.Name, reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "k8s-1dot18dot14-ubuntu")
+	if reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU != "k8s-1dot18dot14-ubuntu-1804" {
+		t.Fatalf("AzureMachinePool %q image is wrong, got %q, expected %q", reconciledAzureMachinePool1.Name, reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "k8s-1dot18dot14-ubuntu-1804")
 	}
 }
