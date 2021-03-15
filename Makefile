@@ -14,7 +14,7 @@ endif
 all: manager
 
 # Run tests
-test: generate fmt vet
+test: generate fmt vet manifests
 	go test ./... -coverprofile cover.out
 
 # Build manager binary
@@ -22,13 +22,17 @@ manager: generate fmt vet
 	go build -o bin/manager main.go
 
 # Run against the configured Kubernetes cluster in ~/.kube/config
-run: generate fmt vet
+run: generate fmt vet manifests
 	go run ./main.go
 
 # Deploy controller in the configured Kubernetes cluster in ~/.kube/config
-deploy:
+deploy: manifests
 	cd config/manager && kustomize edit set image controller=${IMG}
 	kustomize build config/default | kubectl apply -f -
+
+# Generate manifests e.g. CRD, RBAC etc.
+manifests: controller-gen
+	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 # Run go fmt against code
 fmt:

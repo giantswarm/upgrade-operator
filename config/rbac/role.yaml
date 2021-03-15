@@ -3,33 +3,22 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: upgrade-operator
+  creationTimestamp: null
+  name: manager-role
 rules:
 - apiGroups:
   - cluster.x-k8s.io
   - infrastructure.cluster.x-k8s.io
   resources:
-  - clusters
-  - clusters/status
-  - azureclusters
-  - azureclusters/status
   - awsclusters
   - awsclusters/status
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - azuremachinetemplates
-  - azuremachinetemplates/status
   - awsmachinetemplates
-  - awsmachinetemplates/status
+  - azureclusters
+  - azureclusters/status
+  - azuremachinetemplates
+  - clusters
+  - clusters/status
   verbs:
-  - create
   - get
   - list
   - patch
@@ -44,9 +33,15 @@ rules:
   - list
   - patch
   - update
+  - watch
 - apiGroups:
   - exp.cluster.x-k8s.io
+  - exp.infrastructure.cluster.x-k8s.io
   resources:
+  - awsmachinepools
+  - awsmachinepools/status
+  - azuremachinepools
+  - azuremachinepools/status
   - machinepools
   - machinepools/status
   verbs:
@@ -56,18 +51,12 @@ rules:
   - update
   - watch
 - apiGroups:
-  - exp.infrastructure.cluster.x-k8s.io
+  - infrastructure.cluster.x-k8s.io
   resources:
-  - azuremachinepools
-  - azuremachinepools/status
-  - awsmachinepools
-  - awsmachinepools/status
+  - awsmachinetemplates
+  - azuremachinetemplates
   verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
+  - create
 - apiGroups:
   - release.giantswarm.io
   resources:
@@ -75,3 +64,4 @@ rules:
   verbs:
   - get
   - list
+  - watch
