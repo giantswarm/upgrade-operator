@@ -98,7 +98,7 @@ type ClusterReconciler struct {
 
 func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	log := r.Log.WithValues("cluster", req.NamespacedName)
+	logger := r.Log.WithValues("cluster", req.NamespacedName)
 
 	cluster := &capi.Cluster{}
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, cluster)
@@ -112,96 +112,18 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to get KubeadmControlPlane %q referenced by Cluster %q", cluster.Spec.ControlPlaneRef.Name, req.Name)
 	}
 
-	// Fetch infrastructure machine template for the control plane.
-	infraMachineTemplate, err := external.Get(ctx, r.Client, &kcp.Spec.InfrastructureTemplate, cluster.Namespace)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to retrieve infra machine template %q", kcp.Spec.InfrastructureTemplate.Name)
-	}
-
-	// Fetch Release to know the expected version of different components that will be used as labels.
+	// Fetch Release to know the expected version of different components that will be used.
 	giantswarmRelease, err := getGiantSwarmRelease(ctx, r.Client, cluster)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
-	expectedCACPVersion := getComponentVersion(giantswarmRelease, cacpReleaseComponent)
-
-	// Update Cluster label with CAPI release number.
-	cluster.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
-	err = r.Client.Update(ctx, cluster)
+	_, err = r.upgradeControlPlane(ctx, cluster, kcp, giantswarmRelease)
 	if apierrors.IsConflict(err) {
+		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
 		return ctrl.Result{}, nil
 	} else if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to update Cluster %q", cluster.Name)
-	}
-
-	// Update infrastructure Cluster label with provider release number.
-	infraCluster, err := external.Get(ctx, r.Client, cluster.Spec.InfrastructureRef, cluster.Namespace)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to retrieve infra cluster %q", cluster.Spec.InfrastructureRef.Name)
-	}
-
-	setCAPIWatchFilterLabel(infraCluster, giantswarmRelease)
-	err = r.Client.Update(ctx, infraCluster)
-	if apierrors.IsConflict(err) {
-		return ctrl.Result{}, nil
-	} else if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to update infra reference %q", cluster.Spec.InfrastructureRef.Name)
-	}
-
-	// Create new MachineTemplate and update KubeadmControlPlane to use it, if updating k8s.
-	// Update KubeadmControlPlane label with CACP release number.
-	//controlPlaneNodesWillBeRolled := false
-	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
-	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
-	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
-	currentMachineImage, _, err := unstructured.NestedString(infraMachineTemplate.Object, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to read current machine image from infrastructure machine template %q", infraMachineTemplate.GetName())
-	}
-
-	if expectedMachineImage != currentMachineImage || expectedK8sVersion != kcp.Spec.Version {
-		//controlPlaneNodesWillBeRolled = true
-
-		log.Info("Cluster needs to be upgraded and control planes will be rolled", "currentK8sVersion", kcp.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentOSVersion", kcp.Spec.Version, "expectedOSVersion", expectedK8sVersion)
-		log.Info("Cloning infrastructure template and changing its machine image")
-
-		// Clone infrastructure machine template to new object.
-		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, kcp)
-		if err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to build infrastructure template from %q", kcp.Spec.InfrastructureTemplate.Name)
-		}
-
-		// Update machine template machine image to upgrade k8s or the OS.
-		if err := unstructured.SetNestedField(newInfrastructureMachineTemplate.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...); err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to set infrastructure template %q image to %q", kcp.Spec.InfrastructureTemplate.Name, expectedMachineImage)
-		}
-
-		// Create cloned object.
-		if err := r.Client.Create(ctx, newInfrastructureMachineTemplate); err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to clone infrastructure template from %q to %q used by KubeadmControlPlane %q", kcp.Spec.InfrastructureTemplate.Name, newInfrastructureMachineTemplate.GetName(), kcp.Name)
-		}
-
-		// When upgrading the k8s cluster we need to update
-		// * Name of the secret used as source for the k8s provider config file
-		// * Reference to the infrastructure machine template.
-		// * K8s version in the control plane object.
-		for _, file := range kcp.Spec.KubeadmConfigSpec.Files {
-			if file.ContentFrom.Secret.Name == fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], kcp.Spec.InfrastructureTemplate.Name) {
-				file.ContentFrom.Secret.Name = fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], newInfrastructureMachineTemplate.GetName())
-			}
-		}
-		kcp.Spec.InfrastructureTemplate.Name = newInfrastructureMachineTemplate.GetName()
-		kcp.Spec.Version = expectedK8sVersion
-	}
-
-	kcp.Labels[CAPIWatchFilterLabel] = expectedCACPVersion
-	err = r.Client.Update(ctx, kcp)
-	if apierrors.IsConflict(err) {
-		return ctrl.Result{}, nil
-	} else if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to update KubeadmControlPlane %q", kcp.Name)
+		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q control plane", cluster.Name)
 	}
 
 	// If control plane nodes will be rolled, let's return so that status and
@@ -212,12 +134,14 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	// Maybe control plane was upgraded in previous reconciliation and it's not
 	// done yet, or is just having issues. Let's wait.
-	//if !control-plane-is-upgraded-and-ready {
-	//	return ctrl.Result{}, nil
-	//}
+	if !isReady(kcp) {
+		logger.Info("Control plane is not ready, let's wait before upgrading the workers")
+		return ctrl.Result{}, nil
+	}
 
 	err = r.upgradeWorkers(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
+		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
 		return ctrl.Result{}, nil
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q workers", cluster.Name)
@@ -266,12 +190,98 @@ func (r *ClusterReconciler) getSortedClusterMachinePools(ctx context.Context, cl
 	return machinePoolList.Items, nil
 }
 
-func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
-	logger := r.Log.WithValues("cluster", cluster.Name)
+func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *capi.Cluster, kcp *capikcp.KubeadmControlPlane, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
+	logger := r.Log.WithValues("cluster", cluster.Name, "kubeadmcontrolplane", kcp.Name)
 
+	controlPlaneNodesWillBeRolled := false
+
+	// Fetch infrastructure machine template for the control plane.
+	infraMachineTemplate, err := external.Get(ctx, r.Client, &kcp.Spec.InfrastructureTemplate, cluster.Namespace)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to retrieve infra machine template %q", kcp.Spec.InfrastructureTemplate.Name)
+	}
+
+	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
+	expectedCACPVersion := getComponentVersion(giantswarmRelease, cacpReleaseComponent)
+
+	// Update Cluster label with CAPI release number.
+	cluster.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
+	err = r.Client.Update(ctx, cluster)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to update Cluster %q", cluster.Name)
+	}
+
+	// Update infrastructure Cluster label with provider release number.
+	infraCluster, err := external.Get(ctx, r.Client, cluster.Spec.InfrastructureRef, cluster.Namespace)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to retrieve infra cluster %q", cluster.Spec.InfrastructureRef.Name)
+	}
+
+	setCAPIWatchFilterLabel(infraCluster, giantswarmRelease)
+	err = r.Client.Update(ctx, infraCluster)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to update infra reference %q", cluster.Spec.InfrastructureRef.Name)
+	}
+
+	// Create new MachineTemplate and update KubeadmControlPlane to use it, if updating k8s.
+	// Update KubeadmControlPlane label with CACP release number.
+	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
+	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
+	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
+	currentMachineImage, _, err := unstructured.NestedString(infraMachineTemplate.Object, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to read current machine image from infrastructure machine template %q", infraMachineTemplate.GetName())
+	}
+
+	if expectedMachineImage != currentMachineImage || expectedK8sVersion != kcp.Spec.Version {
+		controlPlaneNodesWillBeRolled = true
+
+		logger.Info("Cluster needs to be upgraded and control planes will be rolled", "currentK8sVersion", kcp.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentOSVersion", kcp.Spec.Version, "expectedOSVersion", expectedK8sVersion)
+		logger.Info("Cloning infrastructure template and changing its machine image")
+
+		// Clone infrastructure machine template to new object.
+		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, kcp)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to build infrastructure template from %q", kcp.Spec.InfrastructureTemplate.Name)
+		}
+
+		// Update machine template machine image to upgrade k8s or the OS.
+		if err := unstructured.SetNestedField(newInfrastructureMachineTemplate.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...); err != nil {
+			return false, errors.Wrapf(err, "failed to set infrastructure template %q image to %q", kcp.Spec.InfrastructureTemplate.Name, expectedMachineImage)
+		}
+
+		// Create cloned object.
+		if err := r.Client.Create(ctx, newInfrastructureMachineTemplate); err != nil {
+			return false, errors.Wrapf(err, "failed to clone infrastructure template from %q to %q used by KubeadmControlPlane %q", kcp.Spec.InfrastructureTemplate.Name, newInfrastructureMachineTemplate.GetName(), kcp.Name)
+		}
+
+		// When upgrading the k8s cluster we need to update
+		// * Name of the secret used as source for the k8s provider config file
+		// * Reference to the infrastructure machine template.
+		// * K8s version in the control plane object.
+		for _, file := range kcp.Spec.KubeadmConfigSpec.Files {
+			if file.ContentFrom.Secret.Name == fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], kcp.Spec.InfrastructureTemplate.Name) {
+				file.ContentFrom.Secret.Name = fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], newInfrastructureMachineTemplate.GetName())
+			}
+		}
+		kcp.Spec.InfrastructureTemplate.Name = newInfrastructureMachineTemplate.GetName()
+		kcp.Spec.Version = expectedK8sVersion
+	}
+
+	kcp.Labels[CAPIWatchFilterLabel] = expectedCACPVersion
+	err = r.Client.Update(ctx, kcp)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to update KubeadmControlPlane %q", kcp.Name)
+	}
+
+	return controlPlaneNodesWillBeRolled, nil
+}
+
+func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
 	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
 	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
 	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
+	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
 
 	clusterMachinePools, err := r.getSortedClusterMachinePools(ctx, cluster)
 	if err != nil {
@@ -279,21 +289,30 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 	}
 
 	for _, machinePool := range clusterMachinePools {
-		//machinePool.Spec.Template.Spec.Version
+		logger := r.Log.WithValues("cluster", cluster.Name, "machinepool", machinePool.Name)
+		logger.Info("Fetching infrastructure MachinePool to check its k8s version and machine image")
+
+		infraMachinePool, err := external.Get(ctx, r.Client, &machinePool.Spec.Template.Spec.InfrastructureRef, machinePool.Namespace)
+		if err != nil {
+			return err
+		}
+
+		currentMachineImage, _, err := unstructured.NestedString(infraMachinePool.Object, strings.Split(KindToMachineImagePath[infraMachinePool.GetKind()], ".")...)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read current machine image from infrastructure machine pool template %q", infraMachinePool.GetName())
+		}
+
 		// If any MachinePool is not ready we exit because we don't want to
 		// trigger an upgrade while something is wrong or another upgrade is in
 		// progress.
 		if !isReady(&machinePool) {
-			logger.Info("The MachinePool %q is not ready. Let's wait before trying to continue upgrading workers")
+			logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading workers")
 			return nil
-		} else if machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
+		} else if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
+			logger.Info("The MachinePool is out of date. Updating the MachinePool and its infrastructure Machine Pool", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
 			machinePool.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
+			machinePool.Spec.Template.Spec.Version = &expectedK8sVersion
 			err = r.Client.Update(ctx, &machinePool)
-			if err != nil {
-				return err
-			}
-
-			infraMachinePool, err := external.Get(ctx, r.Client, &machinePool.Spec.Template.Spec.InfrastructureRef, machinePool.Namespace)
 			if err != nil {
 				return err
 			}
@@ -303,11 +322,12 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 			//	return ctrl.Result{}, nil
 			//}
 
-			// Update node pool machine image to upgrade k8s or the OS.
-			if err := unstructured.SetNestedField(infraMachinePool.Object, MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion], strings.Split(KindToMachineImagePath[machinePool.Spec.Template.Spec.InfrastructureRef.Kind], ".")...); err != nil {
-				return errors.Wrapf(err, "failed to set infra MachinePool %q image to %q", machinePool.Spec.Template.Spec.InfrastructureRef.Name, MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion])
+			// Update infrastructure machine pool machine image to upgrade k8s or the OS.
+			if err := unstructured.SetNestedField(infraMachinePool.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[infraMachinePool.GetKind()], ".")...); err != nil {
+				return errors.Wrapf(err, "failed to set infra MachinePool %q image to %q", infraMachinePool.GetName(), expectedMachineImage)
 			}
 
+			// Update watch filter label also for infrastructure machine pool.
 			setCAPIWatchFilterLabel(infraMachinePool, giantswarmRelease)
 			err = r.Client.Update(ctx, infraMachinePool)
 			if err != nil {

@@ -25,32 +25,14 @@ import (
 )
 
 func TestUpgradeK8sVersion(t *testing.T) {
-	ctx := context.TODO()
+	ctx := context.Background()
 	scheme := runtime.NewScheme()
-	err := capi.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = capiexp.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = capz.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = capzexp.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = kcp.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = releaseapiextensions.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_ = capi.AddToScheme(scheme)
+	_ = capiexp.AddToScheme(scheme)
+	_ = capz.AddToScheme(scheme)
+	_ = capzexp.AddToScheme(scheme)
+	_ = kcp.AddToScheme(scheme)
+	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: v1.ObjectMeta{
@@ -359,32 +341,14 @@ func TestUpgradeK8sVersion(t *testing.T) {
 }
 
 func TestUpgradeOSVersion(t *testing.T) {
-	ctx := context.TODO()
+	ctx := context.Background()
 	scheme := runtime.NewScheme()
-	err := capi.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = capiexp.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = capz.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = capzexp.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = kcp.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = releaseapiextensions.AddToScheme(scheme)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_ = capi.AddToScheme(scheme)
+	_ = capiexp.AddToScheme(scheme)
+	_ = capz.AddToScheme(scheme)
+	_ = capzexp.AddToScheme(scheme)
+	_ = kcp.AddToScheme(scheme)
+	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: v1.ObjectMeta{
@@ -614,9 +578,7 @@ func TestUpgradeOSVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reconciledControlplane.Spec.Version != "v1.18.2" {
-		t.Fatalf("Kubeadmcontrolplane.Spec.Version uses wrong k8s version, got %q, expected %q", reconciledControlplane.Spec.Version, "1.18.2")
-	}
+	assertEquals(t, reconciledControlplane.Spec.Version, "v1.18.2", "Kubeadmcontrolplane.Spec.Version uses wrong k8s version")
 
 	foundProviderFile := false
 	expectedProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
@@ -635,9 +597,7 @@ func TestUpgradeOSVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU != "k8s-1dot18dot2-ubuntu-1810" {
-		t.Fatalf("AzureMachineTemplate %q image is wrong, got %q, expected %q", newAzureMachineTemplate.Name, newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, "k8s-1dot18dot2-ubuntu-1810")
-	}
+	assertEquals(t, newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, "k8s-1dot18dot2-ubuntu-1810", "AzureMachineTemplate image is wrong")
 
 	// Assert node pool uses right machine image.
 	reconciledAzureMachinePool1 := &capzexp.AzureMachinePool{}
@@ -645,9 +605,11 @@ func TestUpgradeOSVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertEquals(t, reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "k8s-1dot18dot2-ubuntu-1810", "AzureMachinePool image is wrong")
+}
 
-	// Assert AzureMachinePool uses the right image.
-	if reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU != "k8s-1dot18dot2-ubuntu-1810" {
-		t.Fatalf("AzureMachinePool %q image is wrong, got %q, expected %q", reconciledAzureMachinePool1.Name, reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "k8s-1dot18dot2-ubuntu-1810")
+func assertEquals(t *testing.T, actual, expected, msg string) {
+	if actual != expected {
+		t.Fatalf("%s, got %q, expected %q", msg, actual, expected)
 	}
 }
