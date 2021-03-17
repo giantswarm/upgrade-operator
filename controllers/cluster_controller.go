@@ -55,8 +55,8 @@ var (
 	KindToMachineImagePath = map[string]string{
 		"AzureMachinePool":     "spec.template.image.marketplace.sku",
 		"AzureMachineTemplate": "spec.template.spec.image.marketplace.sku",
-		"AWSMachinePool":       "spec.template.image.marketplace.sku",
-		"AWSMachineTemplate":   "spec.template.image.marketplace.sku",
+		"AWSMachinePool":       "spec.awslaunchtemplate.imagelookupformat",
+		"AWSMachineTemplate":   "spec.template.spec.imagelookupformat",
 	}
 	KindToK8sProviderFile = map[string]string{
 		"AzureMachineTemplate": "%s-azure-json",
