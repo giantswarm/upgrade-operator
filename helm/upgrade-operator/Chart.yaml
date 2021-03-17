@@ -1,0 +1,8 @@
+name: upgrade-operator
+version: [[ .Version ]]
+description: "Upgrade operator to manage k8s clusters upgrades cross providers"
+appVersion: "[[ .AppVersion ]]"
+home: "https://github.com/giantswarm/upgrade-operator"
+apiVersion: v1
+annotations:
+  application.giantswarm.io/team: "ludacris"
