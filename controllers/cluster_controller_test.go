@@ -3,12 +3,14 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/Azure/go-autorest/autorest/to"
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	apiextensionslabel "github.com/giantswarm/apiextensions/pkg/label"
 	"github.com/stretchr/testify/assert"
 	v12 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/reference"
@@ -22,7 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"testing"
 )
 
 func TestUpgradeK8sVersion(t *testing.T) {
