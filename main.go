@@ -18,8 +18,9 @@ package main
 
 import (
 	"flag"
-	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	"os"
+
+	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
