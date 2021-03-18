@@ -3,7 +3,7 @@ orbs:
 
 version: 2.1
 workflows:
-  build_and_e2eTest:
+  build:
     jobs:
       # build operator
       - architect/go-build:
