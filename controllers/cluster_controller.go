@@ -65,21 +65,21 @@ var (
 	}
 	MachineImagesByK8sVersion = map[string]map[string]string{
 		"v1.18.2": {
-			"v18.04.0": "k8s-1dot18dot2-ubuntu-1804",
+			"v18.4.0":  "k8s-1dot18dot2-ubuntu-1804",
 			"v18.10.0": "k8s-1dot18dot2-ubuntu-1810",
 		},
 		"v1.18.14": {
-			"v18.04.0": "k8s-1dot18dot14-ubuntu-1804",
+			"v18.4.0":  "k8s-1dot18dot14-ubuntu-1804",
 			"v18.10.0": "k8s-1dot18dot14-ubuntu-1810",
 		},
 		"v1.18.15": {
-			"v18.04.0": "k8s-1dot18dot15-ubuntu-1804",
+			"v18.4.0":  "k8s-1dot18dot15-ubuntu-1804",
 			"v18.10.0": "k8s-1dot18dot15-ubuntu-1810",
 		},
 		"v1.18.16": {
-			"v18.04.0": "k8s-1dot18dot16-ubuntu-1804",
+			"v18.4.0":  "k8s-1dot18dot16-ubuntu-1804",
 			"v18.10.0": "k8s-1dot18dot16-ubuntu-1810",
-			"v20.04.0": "k8s-1dot18dot16-ubuntu-2004",
+			"v20.4.0":  "k8s-1dot18dot16-ubuntu-2004",
 		},
 	}
 )
@@ -237,7 +237,7 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 	if expectedMachineImage != currentMachineImage || expectedK8sVersion != kcp.Spec.Version {
 		controlPlaneNodesWillBeRolled = true
 
-		logger.Info("Cluster needs to be upgraded and control planes will be rolled", "currentK8sVersion", kcp.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentOSVersion", kcp.Spec.Version, "expectedOSVersion", expectedK8sVersion)
+		logger.Info("Cluster needs to be upgraded and control planes will be rolled", "currentK8sVersion", kcp.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
 		logger.Info("Cloning infrastructure template and changing its machine image")
 
 		// Clone infrastructure machine template to new object.
@@ -337,6 +337,8 @@ func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cl
 
 			return nil
 		}
+
+		logger.Info("The MachinePool is up to date", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
 	}
 
 	return nil
