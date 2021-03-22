@@ -13,13 +13,13 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/reference"
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	capiexp "sigs.k8s.io/cluster-api/exp/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -51,205 +51,18 @@ func TestUpgradeK8sVersion(t *testing.T) {
 		},
 	}
 
-	azureMachineTemplate := &capz.AzureMachineTemplate{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cp-template",
-			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
-		},
-		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
-			Image: &capz.Image{
-				Marketplace: &capz.AzureMarketplaceImage{
-					Publisher: "cncf-upstream",
-					Offer:     "capi",
-					SKU:       "k8s-1dot18dot2-ubuntu-1804",
-					Version:   "latest",
-				},
-			},
-		}}},
-	}
-	azureMachineTemplateReference, err := reference.GetReference(scheme, azureMachineTemplate)
-	if err != nil {
-		t.Fatal(err)
+	cluster, kubeadmcontrolplane, azureCluster, azureMachineTemplate := newAzureClusterWithControlPlane()
+
+	machinePool1, azureMachinePool1 := newAzureMachinePoolChain(cluster.Name)
+
+	machinePool1.Status = capiexp.MachinePoolStatus{
+		Conditions: capi.Conditions{capi.Condition{
+			Type:   capi.ReadyCondition,
+			Status: v12.ConditionTrue,
+		}},
 	}
 
-	kubeadmcontrolplane := &kcp.KubeadmControlPlane{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster-control-plane-1-18-2",
-			Labels: map[string]string{
-				cacpReleaseComponent:  "v0.3.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: kcp.KubeadmControlPlaneSpec{
-			Replicas:               to.Int32Ptr(1),
-			Version:                "v1.18.2",
-			InfrastructureTemplate: *azureMachineTemplateReference,
-			KubeadmConfigSpec: v1alpha3.KubeadmConfigSpec{
-				Files: []v1alpha3.File{
-					{
-						ContentFrom: &v1alpha3.FileSource{Secret: v1alpha3.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
-					},
-				},
-			},
-		},
-		Status: kcp.KubeadmControlPlaneStatus{
-			Conditions: capi.Conditions{capi.Condition{
-				Type:   capi.ReadyCondition,
-				Status: v12.ConditionTrue,
-			}},
-		},
-	}
-
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	azureCluster := &capz.AzureCluster{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.4.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capz.AzureClusterSpec{
-			ResourceGroup: "",
-		},
-	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cluster := &capi.Cluster{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster",
-			Labels: map[string]string{
-				apiextensionslabel.ReleaseVersion: "v10.0.0",
-				CAPIWatchFilterLabel:              "v0.3.10",
-			},
-		},
-		Spec: capi.ClusterSpec{
-			ControlPlaneRef:   kcpReference,
-			InfrastructureRef: azureClusterReference,
-		},
-	}
-
-	azureMachinePool1 := &capzexp.AzureMachinePool{
-		TypeMeta: v1.TypeMeta{
-			Kind:       "AzureMachinePool",
-			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
-		},
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np01",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.4.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capzexp.AzureMachinePoolSpec{
-			Template: capzexp.AzureMachineTemplate{
-				Image: &capz.Image{
-					Marketplace: &capz.AzureMarketplaceImage{
-						Publisher: "cncf-upstream",
-						Offer:     "capi",
-						SKU:       "k8s-1dot18dot2-ubuntu-1804",
-						Version:   "latest",
-					},
-				},
-			},
-		},
-	}
-
-	machinePool1 := &capiexp.MachinePool{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np01",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.3.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capiexp.MachinePoolSpec{
-			ClusterName: cluster.Name,
-			Template: capi.MachineTemplateSpec{
-				ObjectMeta: capi.ObjectMeta{},
-				Spec: capi.MachineSpec{
-					ClusterName: cluster.Name,
-					InfrastructureRef: v12.ObjectReference{
-						Kind:       azureMachinePool1.Kind,
-						Name:       azureMachinePool1.Name,
-						APIVersion: azureMachinePool1.APIVersion,
-					},
-					Version: to.StringPtr("v1.18.2"),
-				},
-			},
-		},
-		Status: capiexp.MachinePoolStatus{
-			Conditions: capi.Conditions{capi.Condition{
-				Type:   capi.ReadyCondition,
-				Status: v12.ConditionTrue,
-			}},
-		},
-	}
-
-	azureMachinePool2 := &capzexp.AzureMachinePool{
-		TypeMeta: v1.TypeMeta{
-			Kind:       "AzureMachinePool",
-			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
-		},
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np02",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.4.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capzexp.AzureMachinePoolSpec{
-			Template: capzexp.AzureMachineTemplate{
-				Image: &capz.Image{
-					Marketplace: &capz.AzureMarketplaceImage{
-						Publisher: "cncf-upstream",
-						Offer:     "capi",
-						SKU:       "k8s-1dot18dot2-ubuntu-1804",
-						Version:   "latest",
-					},
-				},
-			},
-		},
-	}
-
-	machinePool2 := &capiexp.MachinePool{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np02",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.3.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capiexp.MachinePoolSpec{
-			ClusterName: cluster.Name,
-			Template: capi.MachineTemplateSpec{
-				ObjectMeta: capi.ObjectMeta{},
-				Spec: capi.MachineSpec{
-					ClusterName: cluster.Name,
-					InfrastructureRef: v12.ObjectReference{
-						Kind:       azureMachinePool2.Kind,
-						Name:       azureMachinePool2.Name,
-						APIVersion: azureMachinePool2.APIVersion,
-					},
-					Version: to.StringPtr("v1.18.2"),
-				},
-			},
-		},
-	}
+	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
 
 	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
@@ -259,7 +72,7 @@ func TestUpgradeK8sVersion(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
+	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,205 +167,18 @@ func TestUpgradeOSVersion(t *testing.T) {
 		},
 	}
 
-	azureMachineTemplate := &capz.AzureMachineTemplate{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster-control-plane-1a2b3c",
-			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
-		},
-		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
-			Image: &capz.Image{
-				Marketplace: &capz.AzureMarketplaceImage{
-					Publisher: "cncf-upstream",
-					Offer:     "capi",
-					SKU:       "k8s-1dot18dot2-ubuntu-1804",
-					Version:   "latest",
-				},
-			},
-		}}},
-	}
-	azureMachineTemplateReference, err := reference.GetReference(scheme, azureMachineTemplate)
-	if err != nil {
-		t.Fatal(err)
+	cluster, kubeadmcontrolplane, azureCluster, azureMachineTemplate := newAzureClusterWithControlPlane()
+
+	machinePool1, azureMachinePool1 := newAzureMachinePoolChain(cluster.Name)
+
+	machinePool1.Status = capiexp.MachinePoolStatus{
+		Conditions: capi.Conditions{capi.Condition{
+			Type:   capi.ReadyCondition,
+			Status: v12.ConditionTrue,
+		}},
 	}
 
-	kubeadmcontrolplane := &kcp.KubeadmControlPlane{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster-control-plane",
-			Labels: map[string]string{
-				cacpReleaseComponent:  "v0.3.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: kcp.KubeadmControlPlaneSpec{
-			Replicas:               to.Int32Ptr(1),
-			Version:                "v1.18.2",
-			InfrastructureTemplate: *azureMachineTemplateReference,
-			KubeadmConfigSpec: v1alpha3.KubeadmConfigSpec{
-				Files: []v1alpha3.File{
-					{
-						ContentFrom: &v1alpha3.FileSource{Secret: v1alpha3.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
-					},
-				},
-			},
-		},
-		Status: kcp.KubeadmControlPlaneStatus{
-			Conditions: capi.Conditions{capi.Condition{
-				Type:   capi.ReadyCondition,
-				Status: v12.ConditionTrue,
-			}},
-		},
-	}
-
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	azureCluster := &capz.AzureCluster{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.4.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capz.AzureClusterSpec{
-			ResourceGroup: "",
-		},
-	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cluster := &capi.Cluster{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "my-cluster",
-			Labels: map[string]string{
-				apiextensionslabel.ReleaseVersion: "v10.0.0",
-				CAPIWatchFilterLabel:              "v0.3.10",
-			},
-		},
-		Spec: capi.ClusterSpec{
-			ControlPlaneRef:   kcpReference,
-			InfrastructureRef: azureClusterReference,
-		},
-	}
-
-	azureMachinePool1 := &capzexp.AzureMachinePool{
-		TypeMeta: v1.TypeMeta{
-			Kind:       "AzureMachinePool",
-			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
-		},
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np01",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.4.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capzexp.AzureMachinePoolSpec{
-			Template: capzexp.AzureMachineTemplate{
-				Image: &capz.Image{
-					Marketplace: &capz.AzureMarketplaceImage{
-						Publisher: "cncf-upstream",
-						Offer:     "capi",
-						SKU:       "k8s-1dot18dot2-ubuntu-1804",
-						Version:   "latest",
-					},
-				},
-			},
-		},
-	}
-
-	machinePool1 := &capiexp.MachinePool{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np01",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.3.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capiexp.MachinePoolSpec{
-			ClusterName: cluster.Name,
-			Template: capi.MachineTemplateSpec{
-				ObjectMeta: capi.ObjectMeta{},
-				Spec: capi.MachineSpec{
-					ClusterName: cluster.Name,
-					InfrastructureRef: v12.ObjectReference{
-						Kind:       azureMachinePool1.Kind,
-						Name:       azureMachinePool1.Name,
-						APIVersion: azureMachinePool1.APIVersion,
-					},
-					Version: to.StringPtr("v1.18.2"),
-				},
-			},
-		},
-		Status: capiexp.MachinePoolStatus{
-			Conditions: capi.Conditions{capi.Condition{
-				Type:   capi.ReadyCondition,
-				Status: v12.ConditionTrue,
-			}},
-		},
-	}
-
-	azureMachinePool2 := &capzexp.AzureMachinePool{
-		TypeMeta: v1.TypeMeta{
-			Kind:       "AzureMachinePool",
-			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
-		},
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np02",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.4.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capzexp.AzureMachinePoolSpec{
-			Template: capzexp.AzureMachineTemplate{
-				Image: &capz.Image{
-					Marketplace: &capz.AzureMarketplaceImage{
-						Publisher: "cncf-upstream",
-						Offer:     "capi",
-						SKU:       "k8s-1dot18dot2-ubuntu-1804",
-						Version:   "latest",
-					},
-				},
-			},
-		},
-	}
-
-	machinePool2 := &capiexp.MachinePool{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "default",
-			Name:      "np02",
-			Labels: map[string]string{
-				CAPIWatchFilterLabel:  "v0.3.10",
-				capi.ClusterLabelName: "my-cluster",
-			},
-		},
-		Spec: capiexp.MachinePoolSpec{
-			ClusterName: cluster.Name,
-			Template: capi.MachineTemplateSpec{
-				ObjectMeta: capi.ObjectMeta{},
-				Spec: capi.MachineSpec{
-					ClusterName: cluster.Name,
-					InfrastructureRef: v12.ObjectReference{
-						Kind:       azureMachinePool2.Kind,
-						Name:       azureMachinePool2.Name,
-						APIVersion: azureMachinePool2.APIVersion,
-					},
-					Version: to.StringPtr("v1.18.2"),
-				},
-			},
-		},
-	}
+	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
 
 	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
@@ -562,7 +188,7 @@ func TestUpgradeOSVersion(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
+	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,4 +227,217 @@ func TestUpgradeOSVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1810", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "AzureMachinePool image is wrong")
+}
+
+// HELPERS
+
+func newCluster() *capi.Cluster {
+	name := fmt.Sprintf("test-cluster-%s", util.RandomString(4))
+	return &capi.Cluster{
+		TypeMeta: v1.TypeMeta{
+			Kind:       "Cluster",
+			APIVersion: capi.GroupVersion.String(),
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+			Labels: map[string]string{
+				apiextensionslabel.ReleaseVersion: "v10.0.0",
+				CAPIWatchFilterLabel:              "v0.3.10",
+			},
+		},
+	}
+}
+
+func newKubeadmControlPlane(cluster string) *kcp.KubeadmControlPlane {
+	name := fmt.Sprintf("%s-control-plane-%s", cluster, util.RandomString(4))
+	return &kcp.KubeadmControlPlane{
+		TypeMeta: v1.TypeMeta{
+			Kind:       "KubeadmControlPlane",
+			APIVersion: kcp.GroupVersion.String(),
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+			Labels: map[string]string{
+				cacpReleaseComponent:  "v0.3.10",
+				capi.ClusterLabelName: cluster,
+			},
+		},
+		Spec: kcp.KubeadmControlPlaneSpec{
+			Replicas: to.Int32Ptr(1),
+			Version:  "v1.18.2",
+		},
+		Status: kcp.KubeadmControlPlaneStatus{
+			Conditions: capi.Conditions{capi.Condition{
+				Type:   capi.ReadyCondition,
+				Status: v12.ConditionTrue,
+			}},
+		},
+	}
+}
+
+func newClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane) {
+	cluster := newCluster()
+	kcp := newKubeadmControlPlane(cluster.Name)
+	cluster.Spec.ControlPlaneRef = &v12.ObjectReference{
+		Kind:       kcp.Kind,
+		Namespace:  kcp.Namespace,
+		Name:       kcp.Name,
+		APIVersion: kcp.APIVersion,
+	}
+	kcp.ObjectMeta.OwnerReferences = append(kcp.ObjectMeta.OwnerReferences, v1.OwnerReference{
+		Kind:       cluster.Kind,
+		Name:       cluster.Name,
+		UID:        cluster.UID,
+		APIVersion: cluster.APIVersion,
+	})
+	return cluster, kcp
+}
+
+func newAzureCluster(name string) *capz.AzureCluster {
+	return &capz.AzureCluster{
+		TypeMeta: v1.TypeMeta{
+			Kind:       "AzureCluster",
+			APIVersion: capz.GroupVersion.String(),
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "v0.4.10",
+				capi.ClusterLabelName: name,
+			},
+		},
+		Spec: capz.AzureClusterSpec{
+			ResourceGroup: "",
+		},
+	}
+}
+
+func newAzureCapiImage() *capz.Image {
+	return &capz.Image{
+		Marketplace: &capz.AzureMarketplaceImage{
+			Publisher: "cncf-upstream",
+			Offer:     "capi",
+			SKU:       "k8s-1dot18dot2-ubuntu-1804",
+			Version:   "latest",
+		},
+	}
+}
+
+func newAzureMachineTemplate(cluster string) *capz.AzureMachineTemplate {
+	name := fmt.Sprintf("%s-control-plane-%s", cluster, util.RandomString(4))
+	return &capz.AzureMachineTemplate{
+		TypeMeta: v1.TypeMeta{
+			Kind:       "AzureMachineTemplate",
+			APIVersion: capz.GroupVersion.String(),
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+			Labels:    map[string]string{capi.ClusterLabelName: cluster},
+		},
+		Spec: capz.AzureMachineTemplateSpec{
+			Template: capz.AzureMachineTemplateResource{
+				Spec: capz.AzureMachineSpec{
+					Image: newAzureCapiImage(),
+				},
+			},
+		},
+	}
+}
+
+func newAzureClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane, *capz.AzureCluster, *capz.AzureMachineTemplate) {
+	cluster, kcp := newClusterWithControlPlane()
+	azureCluster := newAzureCluster(cluster.Name)
+	azureMachineTemplate := newAzureMachineTemplate(cluster.Name)
+
+	cluster.Spec.InfrastructureRef = &v12.ObjectReference{
+		Kind:       azureCluster.Kind,
+		Namespace:  azureCluster.Namespace,
+		Name:       azureCluster.Name,
+		APIVersion: azureCluster.APIVersion,
+	}
+	kcp.Spec.InfrastructureTemplate = v12.ObjectReference{
+		Kind:       azureMachineTemplate.Kind,
+		Namespace:  azureMachineTemplate.Namespace,
+		Name:       azureMachineTemplate.Name,
+		APIVersion: azureMachineTemplate.APIVersion,
+	}
+	kcp.Spec.KubeadmConfigSpec.Files = append(
+		kcp.Spec.KubeadmConfigSpec.Files,
+		v1alpha3.File{
+			ContentFrom: &v1alpha3.FileSource{
+				Secret: v1alpha3.SecretFileSource{
+					Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name),
+				},
+			},
+		},
+	)
+
+	return cluster, kcp, azureCluster, azureMachineTemplate
+}
+
+func newAzureMachinePool(cluster, name string) *capzexp.AzureMachinePool {
+	return &capzexp.AzureMachinePool{
+		// TODO (mig4): I think specifying TypeMeta explicitly is only necessary because
+		//   we don't start the manager correctly, this causes references to this object
+		//   be invalid because when `reference.GetReference` sees an empty GVK it tries
+		//   to look it up but fails because testenv is not fully initialised; i.e. test
+		//   if this is necessary if we initialise the manager in `suite_test.go`
+		TypeMeta: v1.TypeMeta{
+			Kind:       "AzureMachinePool",
+			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "v0.4.10",
+				capi.ClusterLabelName: cluster,
+			},
+		},
+		Spec: capzexp.AzureMachinePoolSpec{
+			Template: capzexp.AzureMachineTemplate{
+				Image: newAzureCapiImage(),
+			},
+		},
+	}
+}
+
+func newMachinePool(cluster string) *capiexp.MachinePool {
+	name := fmt.Sprintf("%s-mp-%s", cluster, util.RandomString(4))
+	return &capiexp.MachinePool{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      name,
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "v0.3.10",
+				capi.ClusterLabelName: cluster,
+			},
+		},
+		Spec: capiexp.MachinePoolSpec{
+			ClusterName: cluster,
+			Template: capi.MachineTemplateSpec{
+				Spec: capi.MachineSpec{
+					ClusterName: cluster,
+					Version:     to.StringPtr("v1.18.2"),
+				},
+			},
+		},
+	}
+}
+
+func newAzureMachinePoolChain(cluster string) (*capiexp.MachinePool, *capzexp.AzureMachinePool) {
+	mp := newMachinePool(cluster)
+	amp := newAzureMachinePool(cluster, mp.Name)
+
+	mp.Spec.Template.Spec.InfrastructureRef = v12.ObjectReference{
+		Kind:       amp.Kind,
+		Name:       amp.Name,
+		APIVersion: amp.APIVersion,
+	}
+
+	return mp, amp
 }
