@@ -5,7 +5,7 @@ go 1.13
 require (
 	github.com/Azure/go-autorest/autorest/to v0.4.0
 	github.com/giantswarm/apiextensions v0.4.20
-	github.com/go-logr/logr v0.1.0
+	github.com/go-logr/logr v0.4.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.6.1
 	k8s.io/api v0.17.14
