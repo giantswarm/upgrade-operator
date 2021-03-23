@@ -293,6 +293,8 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 	return controlPlaneNodesWillBeRolled, nil
 }
 
+// upgradeMachinePool checks the machine image and k8s version used and will
+// update the infra Machine Pool so it uses the right versions.
 func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *capi.Cluster, machinePool *capiexp.MachinePool, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
 	logger := r.Log.WithValues("cluster", cluster.Name, "machinepool", machinePool.Name)
 	logger.Info("Fetching infrastructure MachinePool to check its k8s version and machine image")
@@ -352,6 +354,9 @@ func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *cap
 	return false, nil
 }
 
+// upgradeMachineDeployment checks the machine image and k8s version used and
+// will create a new infra Machine Template with the right versions when
+// current Machine Template is out of date.
 func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluster *capi.Cluster, machineDeployment *capi.MachineDeployment, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
 	logger := r.Log.WithValues("cluster", cluster.Name, "machineDeployment", machineDeployment.Name)
 
@@ -434,6 +439,8 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 	return workerNodesWillBeRolled, nil
 }
 
+// upgradeMachinePools will fetch the MachinePools for the given cluster and
+// try to upgrade k8s and OS, setting the right labels.
 func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
 	clusterMachinePools, err := r.getSortedClusterMachinePools(ctx, cluster)
 	if err != nil {
@@ -450,6 +457,8 @@ func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *ca
 	return nil
 }
 
+// upgradeMachineDeployments will fetch the MachineDeployments for the given
+// cluster and try to upgrade k8s and OS, setting the right labels.
 func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
 	clusterMachineDeployments, err := r.getSortedClusterMachineDeployments(ctx, cluster)
 	if err != nil {
@@ -466,6 +475,9 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 	return nil
 }
 
+// upgradeWorkers will upgrade both MachinePools and MachineDeployments.
+// While it's technically possible for a cluster to have both types of node
+// pools, we assume no cluster would have both at the same time.
 func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
 	err := r.upgradeMachinePools(ctx, cluster, giantswarmRelease)
 	if err != nil {
