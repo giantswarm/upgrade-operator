@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/scheme"
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -28,13 +29,6 @@ import (
 
 func TestUpgradeK8sVersion(t *testing.T) {
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -64,12 +58,12 @@ func TestUpgradeK8sVersion(t *testing.T) {
 
 	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+	ctrlClient := newFakeClient(release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
@@ -144,13 +138,6 @@ func TestUpgradeK8sVersion(t *testing.T) {
 
 func TestUpgradeOSVersion(t *testing.T) {
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -180,12 +167,12 @@ func TestUpgradeOSVersion(t *testing.T) {
 
 	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+	ctrlClient := newFakeClient(release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
@@ -230,6 +217,10 @@ func TestUpgradeOSVersion(t *testing.T) {
 }
 
 // HELPERS
+
+func newFakeClient(initObjs ...runtime.Object) client.Client {
+	return fake.NewFakeClientWithScheme(scheme.Scheme, initObjs...)
+}
 
 func newCluster() *capi.Cluster {
 	name := fmt.Sprintf("test-cluster-%s", util.RandomString(4))
@@ -381,11 +372,6 @@ func newAzureClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane,
 
 func newAzureMachinePool(cluster, name string) *capzexp.AzureMachinePool {
 	return &capzexp.AzureMachinePool{
-		// TODO (mig4): I think specifying TypeMeta explicitly is only necessary because
-		//   we don't start the manager correctly, this causes references to this object
-		//   be invalid because when `reference.GetReference` sees an empty GVK it tries
-		//   to look it up but fails because testenv is not fully initialised; i.e. test
-		//   if this is necessary if we initialise the manager in `suite_test.go`
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "AzureMachinePool",
 			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
