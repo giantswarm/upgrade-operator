@@ -19,6 +19,9 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/Azure/go-autorest/autorest/to"
+	corev1 "k8s.io/api/core/v1"
+	cabpk "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	"strings"
 
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
@@ -157,14 +160,14 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *ClusterReconciler) CloneTemplate(ctx context.Context, kcp *capikcp.KubeadmControlPlane) (*unstructured.Unstructured, error) {
-	infrastructureMachineTemplate, err := external.Get(ctx, r.Client, &kcp.Spec.InfrastructureTemplate, kcp.Namespace)
+func (r *ClusterReconciler) CloneTemplate(ctx context.Context, templateReference *corev1.ObjectReference, ownerNamespace, ownerName string) (*unstructured.Unstructured, error) {
+	infrastructureMachineTemplate, err := external.Get(ctx, r.Client, templateReference, ownerNamespace)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get infrastructure template %q referenced by KubeadmControlPlane %q", kcp.Spec.InfrastructureTemplate.Name, kcp.Name)
+		return nil, errors.Wrapf(err, "failed to get infrastructure template %q referenced by %s/%s", templateReference.Name, ownerNamespace, ownerName)
 	}
 
 	to := &unstructured.Unstructured{Object: infrastructureMachineTemplate.Object}
-	to.SetName(names.SimpleNameGenerator.GenerateName(kcp.Name + "-"))
+	to.SetName(names.SimpleNameGenerator.GenerateName(ownerName + "-"))
 	to.SetResourceVersion("")
 	to.SetFinalizers(nil)
 	to.SetUID("")
@@ -189,6 +192,18 @@ func (r *ClusterReconciler) getSortedClusterMachinePools(ctx context.Context, cl
 	}
 
 	return machinePoolList.Items, nil
+}
+
+// getSortedClusterMachineDeployments returns the MachineDeployments that belong to the given Cluster.
+// TODO: Allow users to sort the MachineDeployments by some priority label on them.
+func (r *ClusterReconciler) getSortedClusterMachineDeployments(ctx context.Context, cluster *capi.Cluster) ([]capi.MachineDeployment, error) {
+	machineDeploymentList := &capi.MachineDeploymentList{}
+	err := r.Client.List(ctx, machineDeploymentList, client.MatchingLabels{capi.ClusterLabelName: cluster.Name})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list MachineDeployments labeled %q", cluster.Name)
+	}
+
+	return machineDeploymentList.Items, nil
 }
 
 func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *capi.Cluster, kcp *capikcp.KubeadmControlPlane, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
@@ -241,7 +256,7 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 		logger.Info("Cloning infrastructure template and changing its machine image")
 
 		// Clone infrastructure machine template to new object.
-		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, kcp)
+		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, &kcp.Spec.InfrastructureTemplate, kcp.Namespace, kcp.Name)
 		if err != nil {
 			return false, errors.Wrapf(err, "failed to build infrastructure template from %q", kcp.Spec.InfrastructureTemplate.Name)
 		}
@@ -278,67 +293,188 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 	return controlPlaneNodesWillBeRolled, nil
 }
 
-func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
+func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *capi.Cluster, machinePool *capiexp.MachinePool, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
+	logger := r.Log.WithValues("cluster", cluster.Name, "machinepool", machinePool.Name)
+	logger.Info("Fetching infrastructure MachinePool to check its k8s version and machine image")
+
 	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
 	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
 	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
 	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
 
+	infraMachinePool, err := external.Get(ctx, r.Client, &machinePool.Spec.Template.Spec.InfrastructureRef, machinePool.Namespace)
+	if err != nil {
+		return false, err
+	}
+
+	currentMachineImage, _, err := unstructured.NestedString(infraMachinePool.Object, strings.Split(KindToMachineImagePath[infraMachinePool.GetKind()], ".")...)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to read current machine image from infrastructure machine pool template %q", infraMachinePool.GetName())
+	}
+
+	// If any MachinePool is not ready we exit because we don't want to
+	// trigger an upgrade while something is wrong or another upgrade is in
+	// progress.
+	if !isReady(machinePool) {
+		logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading workers")
+		return false, nil
+	} else if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
+		logger.Info("The MachinePool is out of date. Updating the MachinePool and its infrastructure Machine Pool", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
+		machinePool.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
+		machinePool.Spec.Template.Spec.Version = &expectedK8sVersion
+		err = r.Client.Update(ctx, machinePool)
+		if err != nil {
+			return false, err
+		}
+
+		//ready, err := external.IsReady(infraMachinePool)
+		//if !ready {
+		//	return ctrl.Result{}, nil
+		//}
+
+		// Update infrastructure machine pool machine image to upgrade k8s or the OS.
+		if err := unstructured.SetNestedField(infraMachinePool.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[infraMachinePool.GetKind()], ".")...); err != nil {
+			return false, errors.Wrapf(err, "failed to set infra MachinePool %q image to %q", infraMachinePool.GetName(), expectedMachineImage)
+		}
+
+		// Update watch filter label also for infrastructure machine pool.
+		setCAPIWatchFilterLabel(infraMachinePool, giantswarmRelease)
+		err = r.Client.Update(ctx, infraMachinePool)
+		if err != nil {
+			return false, err
+		}
+
+		return true, nil
+	}
+
+	logger.Info("The MachinePool is up to date", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
+
+	return false, nil
+}
+
+func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluster *capi.Cluster, machineDeployment *capi.MachineDeployment, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
+	logger := r.Log.WithValues("cluster", cluster.Name, "machineDeployment", machineDeployment.Name)
+
+	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
+	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
+	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
+	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
+
+	infraMachineTemplateReference := &machineDeployment.Spec.Template.Spec.InfrastructureRef
+
+	workerNodesWillBeRolled := false
+
+	// Fetch infrastructure machine template for the machine deployment.
+	infraMachineTemplate, err := external.Get(ctx, r.Client, infraMachineTemplateReference, cluster.Namespace)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to retrieve infra machine template %q", infraMachineTemplateReference.Name)
+	}
+
+	// Update MachineDeployment label with CAPI release number.
+	logger.Info("Setting MachineDeployment watch filter label")
+	machineDeployment.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
+
+	// Create new MachineTemplate and update MachineDeployment to use it, if updating k8s.
+	currentMachineImage, _, err := unstructured.NestedString(infraMachineTemplate.Object, strings.Split(KindToMachineImagePath[infraMachineTemplateReference.Kind], ".")...)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to read current machine image from infrastructure machine template %q", infraMachineTemplate.GetName())
+	}
+
+	if expectedMachineImage != currentMachineImage || expectedK8sVersion != *machineDeployment.Spec.Template.Spec.Version {
+		workerNodesWillBeRolled = true
+
+		logger.Info("MachineDeployment worker nodes need to be upgraded and nodes will be rolled", "currentK8sVersion", machineDeployment.Spec.Template.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
+		logger.Info("Cloning infrastructure template and changing its machine image")
+
+		// Clone infrastructure machine template to new object.
+		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, infraMachineTemplateReference, machineDeployment.Namespace, machineDeployment.Name)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to build infrastructure template from %q", infraMachineTemplateReference.Name)
+		}
+
+		// Update machine template machine image to upgrade k8s or the OS.
+		if err := unstructured.SetNestedField(newInfrastructureMachineTemplate.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[infraMachineTemplateReference.Kind], ".")...); err != nil {
+			return false, errors.Wrapf(err, "failed to set infrastructure template %q image to %q", infraMachineTemplateReference.Name, expectedMachineImage)
+		}
+
+		// Create cloned object.
+		if err := r.Client.Create(ctx, newInfrastructureMachineTemplate); err != nil {
+			return false, errors.Wrapf(err, "failed to clone infrastructure template from %q to %q used by KubeadmControlPlane %q", infraMachineTemplateReference.Name, newInfrastructureMachineTemplate.GetName(), machineDeployment.Name)
+		}
+
+		// When upgrading the k8s cluster we need to update
+		// * Name of the secret used as source for the k8s provider config file
+		// * Reference to the infrastructure machine template.
+		// * K8s version in the control plane object.
+		kubeadmconfigtemplate := &cabpk.KubeadmConfigTemplate{}
+		err = r.Client.Get(ctx, client.ObjectKey{Namespace: machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Namespace, Name: machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name}, kubeadmconfigtemplate)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to retrieve workers bootstrap KubeadmConfigTemplate %q", machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name)
+		}
+
+		for _, file := range kubeadmconfigtemplate.Spec.Template.Spec.Files {
+			if file.ContentFrom.Secret.Name == fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], machineDeployment.Spec.Template.Spec.InfrastructureRef.Name) {
+				file.ContentFrom.Secret.Name = fmt.Sprintf(KindToK8sProviderFile[newInfrastructureMachineTemplate.GetKind()], newInfrastructureMachineTemplate.GetName())
+			}
+		}
+		err = r.Client.Update(ctx, kubeadmconfigtemplate)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to update KubeadmConfigTemplate %q", kubeadmconfigtemplate.Name)
+		}
+
+		machineDeployment.Spec.Template.Spec.InfrastructureRef.Name = newInfrastructureMachineTemplate.GetName()
+		machineDeployment.Spec.Template.Spec.Version = to.StringPtr(expectedK8sVersion)
+	}
+
+	err = r.Client.Update(ctx, machineDeployment)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to update MachineDeployment %q", machineDeployment.Name)
+	}
+
+	return workerNodesWillBeRolled, nil
+}
+
+func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
 	clusterMachinePools, err := r.getSortedClusterMachinePools(ctx, cluster)
 	if err != nil {
 		return err
 	}
 
 	for _, machinePool := range clusterMachinePools {
-		logger := r.Log.WithValues("cluster", cluster.Name, "machinepool", machinePool.Name)
-		logger.Info("Fetching infrastructure MachinePool to check its k8s version and machine image")
-
-		infraMachinePool, err := external.Get(ctx, r.Client, &machinePool.Spec.Template.Spec.InfrastructureRef, machinePool.Namespace)
+		_, err = r.upgradeMachinePool(ctx, cluster, &machinePool, giantswarmRelease)
 		if err != nil {
 			return err
 		}
+	}
 
-		currentMachineImage, _, err := unstructured.NestedString(infraMachinePool.Object, strings.Split(KindToMachineImagePath[infraMachinePool.GetKind()], ".")...)
+	return nil
+}
+
+func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
+	clusterMachineDeployments, err := r.getSortedClusterMachineDeployments(ctx, cluster)
+	if err != nil {
+		return err
+	}
+
+	for _, machineDeployment := range clusterMachineDeployments {
+		_, err = r.upgradeMachineDeployment(ctx, cluster, &machineDeployment, giantswarmRelease)
 		if err != nil {
-			return errors.Wrapf(err, "failed to read current machine image from infrastructure machine pool template %q", infraMachinePool.GetName())
+			return err
 		}
+	}
 
-		// If any MachinePool is not ready we exit because we don't want to
-		// trigger an upgrade while something is wrong or another upgrade is in
-		// progress.
-		if !isReady(&machinePool) {
-			logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading workers")
-			return nil
-		} else if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
-			logger.Info("The MachinePool is out of date. Updating the MachinePool and its infrastructure Machine Pool", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
-			machinePool.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
-			machinePool.Spec.Template.Spec.Version = &expectedK8sVersion
-			err = r.Client.Update(ctx, &machinePool)
-			if err != nil {
-				return err
-			}
+	return nil
+}
 
-			//ready, err := external.IsReady(infraMachinePool)
-			//if !ready {
-			//	return ctrl.Result{}, nil
-			//}
+func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
+	err := r.upgradeMachinePools(ctx, cluster, giantswarmRelease)
+	if err != nil {
+		return err
+	}
 
-			// Update infrastructure machine pool machine image to upgrade k8s or the OS.
-			if err := unstructured.SetNestedField(infraMachinePool.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[infraMachinePool.GetKind()], ".")...); err != nil {
-				return errors.Wrapf(err, "failed to set infra MachinePool %q image to %q", infraMachinePool.GetName(), expectedMachineImage)
-			}
-
-			// Update watch filter label also for infrastructure machine pool.
-			setCAPIWatchFilterLabel(infraMachinePool, giantswarmRelease)
-			err = r.Client.Update(ctx, infraMachinePool)
-			if err != nil {
-				return err
-			}
-
-			return nil
-		}
-
-		logger.Info("The MachinePool is up to date", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
+	err = r.upgradeMachineDeployments(ctx, cluster, giantswarmRelease)
+	if err != nil {
+		return err
 	}
 
 	return nil

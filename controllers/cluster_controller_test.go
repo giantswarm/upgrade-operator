@@ -17,7 +17,7 @@ import (
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
-	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
+	cabpk "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	capiexp "sigs.k8s.io/cluster-api/exp/api/v1alpha3"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -86,10 +86,10 @@ func TestUpgradeK8sVersion(t *testing.T) {
 			Replicas:               to.Int32Ptr(1),
 			Version:                "v1.18.2",
 			InfrastructureTemplate: *azureMachineTemplateReference,
-			KubeadmConfigSpec: v1alpha3.KubeadmConfigSpec{
-				Files: []v1alpha3.File{
+			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				Files: []cabpk.File{
 					{
-						ContentFrom: &v1alpha3.FileSource{Secret: v1alpha3.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
+						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
 					},
 				},
 			},
@@ -329,6 +329,283 @@ func TestUpgradeK8sVersion(t *testing.T) {
 	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, fmt.Sprintf("AzureMachinePool %s is wrong", reconciledAzureMachinePool1.Name))
 }
 
+func TestUpgradeK8sVersionWithMachineDeployments(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = capi.AddToScheme(scheme)
+	_ = capiexp.AddToScheme(scheme)
+	_ = capz.AddToScheme(scheme)
+	_ = capzexp.AddToScheme(scheme)
+	_ = kcp.AddToScheme(scheme)
+	_ = cabpk.AddToScheme(scheme)
+	_ = releaseapiextensions.AddToScheme(scheme)
+
+	release10dot0 := &releaseapiextensions.Release{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "v10.0.0",
+		},
+		Spec: releaseapiextensions.ReleaseSpec{
+			Components: []releaseapiextensions.ReleaseSpecComponent{
+				{Name: "kubernetes", Version: "1.18.14"},
+				{Name: capiReleaseComponent, Version: "0.3.14"},
+				{Name: cacpReleaseComponent, Version: "0.3.14"},
+				{Name: capzReleaseComponent, Version: "0.4.12"},
+				{Name: "image", Version: "18.4.0"},
+			},
+		},
+	}
+
+	cpAzureMachineTemplate := &capz.AzureMachineTemplate{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster-control-plane-1a2b3c",
+			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
+		},
+		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
+			Image: &capz.Image{
+				Marketplace: &capz.AzureMarketplaceImage{
+					Publisher: "cncf-upstream",
+					Offer:     "capi",
+					SKU:       "k8s-1dot18dot2-ubuntu-1804",
+					Version:   "latest",
+				},
+			},
+		}}},
+	}
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kubeadmcontrolplane := &kcp.KubeadmControlPlane{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster-control-plane-1-18-2",
+			Labels: map[string]string{
+				cacpReleaseComponent:  "v0.3.10",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: kcp.KubeadmControlPlaneSpec{
+			Replicas:               to.Int32Ptr(1),
+			Version:                "v1.18.2",
+			InfrastructureTemplate: *cpAzureMachineTemplateReference,
+			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				Files: []cabpk.File{
+					{
+						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
+					},
+				},
+			},
+		},
+		Status: kcp.KubeadmControlPlaneStatus{
+			Conditions: capi.Conditions{capi.Condition{
+				Type:   capi.ReadyCondition,
+				Status: v12.ConditionTrue,
+			}},
+		},
+	}
+
+	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	azureCluster := &capz.AzureCluster{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster",
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "v0.4.10",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: capz.AzureClusterSpec{
+			ResourceGroup: "",
+		},
+	}
+	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster := &capi.Cluster{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster",
+			Labels: map[string]string{
+				apiextensionslabel.ReleaseVersion: "v10.0.0",
+				CAPIWatchFilterLabel:              "v0.3.10",
+			},
+		},
+		Spec: capi.ClusterSpec{
+			ControlPlaneRef:   kcpReference,
+			InfrastructureRef: azureClusterReference,
+		},
+	}
+
+	workersAzureMachineTemplate := &capz.AzureMachineTemplate{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "md01-1a2b3c",
+			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
+		},
+		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
+			Image: &capz.Image{
+				Marketplace: &capz.AzureMarketplaceImage{
+					Publisher: "cncf-upstream",
+					Offer:     "capi",
+					SKU:       "k8s-1dot18dot2-ubuntu-1804",
+					Version:   "latest",
+				},
+			},
+		}}},
+	}
+	workersAzureMachineTemplateReference, err := reference.GetReference(scheme, workersAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kubeadmconfigTemplate := &cabpk.KubeadmConfigTemplate{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "md01",
+		},
+		Spec: cabpk.KubeadmConfigTemplateSpec{
+			Template: cabpk.KubeadmConfigTemplateResource{
+				Spec: cabpk.KubeadmConfigSpec{
+					Files: []cabpk.File{
+						{
+							ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", workersAzureMachineTemplate.Name)}},
+						},
+					},
+				},
+			},
+		},
+	}
+	kubeadmconfigTemplateReference, err := reference.GetReference(scheme, kubeadmconfigTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	machineDeployment1 := &capi.MachineDeployment{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+			Name:      "md01",
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "v0.3.10",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: capi.MachineDeploymentSpec{
+			ClusterName: cluster.Name,
+			Replicas:    to.Int32Ptr(3),
+			Template: capi.MachineTemplateSpec{
+				ObjectMeta: capi.ObjectMeta{},
+				Spec: capi.MachineSpec{
+					ClusterName: cluster.Name,
+					Bootstrap: capi.Bootstrap{
+						ConfigRef: kubeadmconfigTemplateReference,
+					},
+					InfrastructureRef: *workersAzureMachineTemplateReference,
+					Version:           to.StringPtr("v1.18.2"),
+				},
+			},
+		},
+	}
+
+	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, workersAzureMachineTemplate, machineDeployment1)
+
+	reconciler := ClusterReconciler{
+		Client: ctrlClient,
+		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
+		Scheme: scheme,
+	}
+
+	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert KubeadmControlPlane version and label were updated.
+	reconciledControlplane := &kcp.KubeadmControlPlane{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: kubeadmcontrolplane.Namespace, Name: kubeadmcontrolplane.Name}, reconciledControlplane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v1.18.14", reconciledControlplane.Spec.Version, fmt.Sprintf("KubeadmControlPlane %q has wrong k8s version in KubeadmControlPlane.Spec.Version field", reconciledControlplane.Name))
+	assert.Equal(t, "v0.3.14", reconciledControlplane.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in KubeadmControlPlane %q", CAPIWatchFilterLabel, reconciledControlplane.Name))
+
+	foundCPProviderFile := false
+	expectedCPProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
+	for _, file := range reconciledControlplane.Spec.KubeadmConfigSpec.Files {
+		if file.ContentFrom.Secret.Name == expectedCPProviderFile {
+			foundCPProviderFile = true
+		}
+	}
+	if !foundCPProviderFile {
+		t.Fatalf("None of the defined files match the infrastructure machine template name. The name of the provider file needs to match the infrastructure machine template name, got these files %v, expected name %q", reconciledControlplane.Spec.KubeadmConfigSpec.Files, expectedCPProviderFile)
+	}
+
+	// Assert AzureMachineTemplate used by KubeadmControlPlane uses right machine image.
+	newCPAzureMachineTemplate := &capz.AzureMachineTemplate{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledControlplane.Spec.InfrastructureTemplate.Namespace, Name: reconciledControlplane.Spec.InfrastructureTemplate.Name}, newCPAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", newCPAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, fmt.Sprintf("Control Plane AzureMachineTemplate %q image is wrong", newCPAzureMachineTemplate.Name))
+
+	// Assert CAPI CR's are labeled correctly.
+	reconciledCluster := &capi.Cluster{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, reconciledCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.3.14", reconciledCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in Cluster %q", CAPIWatchFilterLabel, reconciledCluster.Name))
+
+	reconciledMachineDeployment1 := &capi.MachineDeployment{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: machineDeployment1.Namespace, Name: machineDeployment1.Name}, reconciledMachineDeployment1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.3.14", reconciledMachineDeployment1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in MachineDeployment %q", CAPIWatchFilterLabel, reconciledMachineDeployment1.Name))
+	assert.Equal(t, "v1.18.14", *reconciledMachineDeployment1.Spec.Template.Spec.Version, fmt.Sprintf("MachineDeployment %q has wrong k8s version in MachineDeployment.Spec.Template.Spec.Version field", reconciledMachineDeployment1.Name))
+
+	reconciledKubeadmconfigTemplate := &cabpk.KubeadmConfigTemplate{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledMachineDeployment1.Spec.Template.Spec.Bootstrap.ConfigRef.Namespace, Name: reconciledMachineDeployment1.Spec.Template.Spec.Bootstrap.ConfigRef.Name}, reconciledKubeadmconfigTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seenFiles := []string{}
+	foundWorkersProviderFile := false
+	expectedWorkersProviderFile := fmt.Sprintf("%s-azure-json", reconciledMachineDeployment1.Spec.Template.Spec.InfrastructureRef.Name)
+	for _, file := range reconciledKubeadmconfigTemplate.Spec.Template.Spec.Files {
+		seenFiles = append(seenFiles, file.ContentFrom.Secret.Name)
+		if file.ContentFrom.Secret.Name == expectedWorkersProviderFile {
+			foundWorkersProviderFile = true
+		}
+	}
+	if !foundWorkersProviderFile {
+		t.Fatalf("None of the defined files match the infrastructure machine template name. The name of the provider file needs to match the infrastructure machine template name, got these files %v, expected name %q", seenFiles, expectedWorkersProviderFile)
+	}
+
+	// Assert workers AzureMachineTemplate used by MachineDeployment uses right machine image.
+	newWorkersAzureMachineTemplate := &capz.AzureMachineTemplate{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledMachineDeployment1.Spec.Template.Spec.InfrastructureRef.Namespace, Name: reconciledMachineDeployment1.Spec.Template.Spec.InfrastructureRef.Name}, newWorkersAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", newWorkersAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, fmt.Sprintf("Workers AzureMachineTemplate %q image is wrong", newWorkersAzureMachineTemplate.Name))
+
+	// Assert CAPZ CR's are labeled correctly.
+	reconciledAzureCluster := &capz.AzureCluster{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: azureCluster.Namespace, Name: azureCluster.Name}, reconciledAzureCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.4.12", reconciledAzureCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureCluster %q", CAPIWatchFilterLabel, reconciledAzureCluster.Name))
+}
+
 func TestUpgradeOSVersion(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
@@ -389,10 +666,10 @@ func TestUpgradeOSVersion(t *testing.T) {
 			Replicas:               to.Int32Ptr(1),
 			Version:                "v1.18.2",
 			InfrastructureTemplate: *azureMachineTemplateReference,
-			KubeadmConfigSpec: v1alpha3.KubeadmConfigSpec{
-				Files: []v1alpha3.File{
+			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				Files: []cabpk.File{
 					{
-						ContentFrom: &v1alpha3.FileSource{Secret: v1alpha3.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
+						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", azureMachineTemplate.Name)}},
 					},
 				},
 			},
