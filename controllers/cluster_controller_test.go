@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/reference"
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
@@ -32,13 +33,6 @@ func TestUpgradeControlPlaneK8sVersionWithMachinePools(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -69,12 +63,12 @@ func TestUpgradeControlPlaneK8sVersionWithMachinePools(t *testing.T) {
 
 	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+	ctrlClient := newFakeClient(release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
@@ -153,13 +147,6 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -194,7 +181,7 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 			},
 		}}},
 	}
-	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, cpAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +225,7 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 		},
 	}
 
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	kcpReference, err := reference.GetReference(scheme.Scheme, kubeadmcontrolplane)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +243,7 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 			ResourceGroup: "",
 		},
 	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	azureClusterReference, err := reference.GetReference(scheme.Scheme, azureCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,12 +280,12 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 		}},
 	}
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+	ctrlClient := newFakeClient(release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
@@ -378,13 +365,6 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -419,7 +399,7 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 			},
 		}}},
 	}
-	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, cpAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +443,7 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 		},
 	}
 
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	kcpReference, err := reference.GetReference(scheme.Scheme, kubeadmcontrolplane)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +461,7 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 			ResourceGroup: "",
 		},
 	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	azureClusterReference, err := reference.GetReference(scheme.Scheme, azureCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,12 +498,12 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 		}},
 	}
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+	ctrlClient := newFakeClient(release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
@@ -629,14 +609,6 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = cabpk.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -671,7 +643,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		}}},
 	}
-	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, cpAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +687,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 		},
 	}
 
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	kcpReference, err := reference.GetReference(scheme.Scheme, kubeadmcontrolplane)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,7 +705,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 			ResourceGroup: "",
 		},
 	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	azureClusterReference, err := reference.GetReference(scheme.Scheme, azureCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +741,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		}}},
 	}
-	workersAzureMachineTemplateReference, err := reference.GetReference(scheme, workersAzureMachineTemplate)
+	workersAzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, workersAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +763,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		},
 	}
-	kubeadmconfigTemplateReference, err := reference.GetReference(scheme, kubeadmconfigTemplate)
+	kubeadmconfigTemplateReference, err := reference.GetReference(scheme.Scheme, kubeadmconfigTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -827,12 +799,12 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 		},
 	}
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, workersAzureMachineTemplate, machineDeployment1)
+	ctrlClient := newFakeClient(release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, workersAzureMachineTemplate, machineDeployment1)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
@@ -1155,14 +1127,6 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = cabpk.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1197,7 +1161,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		}}},
 	}
-	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, cpAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1241,7 +1205,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 		},
 	}
 
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	kcpReference, err := reference.GetReference(scheme.Scheme, kubeadmcontrolplane)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1259,7 +1223,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			ResourceGroup: "",
 		},
 	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	azureClusterReference, err := reference.GetReference(scheme.Scheme, azureCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1295,7 +1259,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		}}},
 	}
-	machineDeployment1AzureMachineTemplateReference, err := reference.GetReference(scheme, machineDeployment1AzureMachineTemplate)
+	machineDeployment1AzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, machineDeployment1AzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1317,7 +1281,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		}}},
 	}
-	machineDeployment2AzureMachineTemplateReference, err := reference.GetReference(scheme, machineDeployment2AzureMachineTemplate)
+	machineDeployment2AzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, machineDeployment2AzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1339,7 +1303,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		},
 	}
-	kubeadmconfigTemplateReference, err := reference.GetReference(scheme, kubeadmconfigTemplate)
+	kubeadmconfigTemplateReference, err := reference.GetReference(scheme.Scheme, kubeadmconfigTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1406,12 +1370,12 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 		},
 	}
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, machineDeployment1AzureMachineTemplate, machineDeployment1, machineDeployment2AzureMachineTemplate, machineDeployment2)
+	ctrlClient := newFakeClient(release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, machineDeployment1AzureMachineTemplate, machineDeployment1, machineDeployment2AzureMachineTemplate, machineDeployment2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
@@ -1517,14 +1481,6 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = cabpk.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1559,7 +1515,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			},
 		}}},
 	}
-	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, cpAzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1603,7 +1559,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 		},
 	}
 
-	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	kcpReference, err := reference.GetReference(scheme.Scheme, kubeadmcontrolplane)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1621,7 +1577,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			ResourceGroup: "",
 		},
 	}
-	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	azureClusterReference, err := reference.GetReference(scheme.Scheme, azureCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1657,7 +1613,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			},
 		}}},
 	}
-	machineDeployment1AzureMachineTemplateReference, err := reference.GetReference(scheme, machineDeployment1AzureMachineTemplate)
+	machineDeployment1AzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, machineDeployment1AzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1679,7 +1635,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			},
 		}}},
 	}
-	machineDeployment2AzureMachineTemplateReference, err := reference.GetReference(scheme, machineDeployment2AzureMachineTemplate)
+	machineDeployment2AzureMachineTemplateReference, err := reference.GetReference(scheme.Scheme, machineDeployment2AzureMachineTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1701,7 +1657,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			},
 		},
 	}
-	kubeadmconfigTemplateReference, err := reference.GetReference(scheme, kubeadmconfigTemplate)
+	kubeadmconfigTemplateReference, err := reference.GetReference(scheme.Scheme, kubeadmconfigTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1768,12 +1724,12 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 		},
 	}
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, machineDeployment1AzureMachineTemplate, machineDeployment1, machineDeployment2AzureMachineTemplate, machineDeployment2)
+	ctrlClient := newFakeClient(release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, machineDeployment1AzureMachineTemplate, machineDeployment1, machineDeployment2AzureMachineTemplate, machineDeployment2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
@@ -1841,13 +1797,6 @@ func TestUpgradeControlPlaneOSVersionWithMachinePools(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx := context.Background()
-	scheme := runtime.NewScheme()
-	_ = capi.AddToScheme(scheme)
-	_ = capiexp.AddToScheme(scheme)
-	_ = capz.AddToScheme(scheme)
-	_ = capzexp.AddToScheme(scheme)
-	_ = kcp.AddToScheme(scheme)
-	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1878,12 +1827,12 @@ func TestUpgradeControlPlaneOSVersionWithMachinePools(t *testing.T) {
 
 	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
 
-	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+	ctrlClient := newFakeClient(release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
 
 	reconciler := ClusterReconciler{
 		Client: ctrlClient,
 		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
-		Scheme: scheme,
+		Scheme: scheme.Scheme,
 	}
 
 	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
@@ -1930,6 +1879,10 @@ func TestUpgradeControlPlaneOSVersionWithMachinePools(t *testing.T) {
 }
 
 // HELPERS
+
+func newFakeClient(initObjs ...runtime.Object) client.Client {
+	return fake.NewFakeClientWithScheme(scheme.Scheme, initObjs...)
+}
 
 func newCluster() *capi.Cluster {
 	name := fmt.Sprintf("test-cluster-%s", util.RandomString(4))
@@ -2093,11 +2046,6 @@ func newAzureClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane,
 
 func newAzureMachinePool(cluster, name string) *capzexp.AzureMachinePool {
 	return &capzexp.AzureMachinePool{
-		// TODO (mig4): I think specifying TypeMeta explicitly is only necessary because
-		//   we don't start the manager correctly, this causes references to this object
-		//   be invalid because when `reference.GetReference` sees an empty GVK it tries
-		//   to look it up but fails because testenv is not fully initialised; i.e. test
-		//   if this is necessary if we initialise the manager in `suite_test.go`
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "AzureMachinePool",
 			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
