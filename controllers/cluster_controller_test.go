@@ -9,8 +9,8 @@ import (
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	apiextensionslabel "github.com/giantswarm/apiextensions/pkg/label"
 	"github.com/stretchr/testify/assert"
-	v12 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
@@ -37,7 +37,7 @@ func TestUpgradeK8sVersion(t *testing.T) {
 	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: "v10.0.0",
 		},
 		Spec: releaseapiextensions.ReleaseSpec{
@@ -58,7 +58,7 @@ func TestUpgradeK8sVersion(t *testing.T) {
 	machinePool1.Status = capiexp.MachinePoolStatus{
 		Conditions: capi.Conditions{capi.Condition{
 			Type:   capi.ReadyCondition,
-			Status: v12.ConditionTrue,
+			Status: corev1.ConditionTrue,
 		}},
 	}
 
@@ -153,7 +153,7 @@ func TestUpgradeOSVersion(t *testing.T) {
 	_ = releaseapiextensions.AddToScheme(scheme)
 
 	release10dot0 := &releaseapiextensions.Release{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: "v10.0.0",
 		},
 		Spec: releaseapiextensions.ReleaseSpec{
@@ -174,7 +174,7 @@ func TestUpgradeOSVersion(t *testing.T) {
 	machinePool1.Status = capiexp.MachinePoolStatus{
 		Conditions: capi.Conditions{capi.Condition{
 			Type:   capi.ReadyCondition,
-			Status: v12.ConditionTrue,
+			Status: corev1.ConditionTrue,
 		}},
 	}
 
@@ -234,11 +234,11 @@ func TestUpgradeOSVersion(t *testing.T) {
 func newCluster() *capi.Cluster {
 	name := fmt.Sprintf("test-cluster-%s", util.RandomString(4))
 	return &capi.Cluster{
-		TypeMeta: v1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       "Cluster",
 			APIVersion: capi.GroupVersion.String(),
 		},
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 			Labels: map[string]string{
@@ -252,11 +252,11 @@ func newCluster() *capi.Cluster {
 func newKubeadmControlPlane(cluster string) *kcp.KubeadmControlPlane {
 	name := fmt.Sprintf("%s-control-plane-%s", cluster, util.RandomString(4))
 	return &kcp.KubeadmControlPlane{
-		TypeMeta: v1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       "KubeadmControlPlane",
 			APIVersion: kcp.GroupVersion.String(),
 		},
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 			Labels: map[string]string{
@@ -271,7 +271,7 @@ func newKubeadmControlPlane(cluster string) *kcp.KubeadmControlPlane {
 		Status: kcp.KubeadmControlPlaneStatus{
 			Conditions: capi.Conditions{capi.Condition{
 				Type:   capi.ReadyCondition,
-				Status: v12.ConditionTrue,
+				Status: corev1.ConditionTrue,
 			}},
 		},
 	}
@@ -280,13 +280,13 @@ func newKubeadmControlPlane(cluster string) *kcp.KubeadmControlPlane {
 func newClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane) {
 	cluster := newCluster()
 	kcp := newKubeadmControlPlane(cluster.Name)
-	cluster.Spec.ControlPlaneRef = &v12.ObjectReference{
+	cluster.Spec.ControlPlaneRef = &corev1.ObjectReference{
 		Kind:       kcp.Kind,
 		Namespace:  kcp.Namespace,
 		Name:       kcp.Name,
 		APIVersion: kcp.APIVersion,
 	}
-	kcp.ObjectMeta.OwnerReferences = append(kcp.ObjectMeta.OwnerReferences, v1.OwnerReference{
+	kcp.ObjectMeta.OwnerReferences = append(kcp.ObjectMeta.OwnerReferences, metav1.OwnerReference{
 		Kind:       cluster.Kind,
 		Name:       cluster.Name,
 		UID:        cluster.UID,
@@ -297,11 +297,11 @@ func newClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane) {
 
 func newAzureCluster(name string) *capz.AzureCluster {
 	return &capz.AzureCluster{
-		TypeMeta: v1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       "AzureCluster",
 			APIVersion: capz.GroupVersion.String(),
 		},
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 			Labels: map[string]string{
@@ -329,11 +329,11 @@ func newAzureCapiImage() *capz.Image {
 func newAzureMachineTemplate(cluster string) *capz.AzureMachineTemplate {
 	name := fmt.Sprintf("%s-control-plane-%s", cluster, util.RandomString(4))
 	return &capz.AzureMachineTemplate{
-		TypeMeta: v1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       "AzureMachineTemplate",
 			APIVersion: capz.GroupVersion.String(),
 		},
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 			Labels:    map[string]string{capi.ClusterLabelName: cluster},
@@ -353,13 +353,13 @@ func newAzureClusterWithControlPlane() (*capi.Cluster, *kcp.KubeadmControlPlane,
 	azureCluster := newAzureCluster(cluster.Name)
 	azureMachineTemplate := newAzureMachineTemplate(cluster.Name)
 
-	cluster.Spec.InfrastructureRef = &v12.ObjectReference{
+	cluster.Spec.InfrastructureRef = &corev1.ObjectReference{
 		Kind:       azureCluster.Kind,
 		Namespace:  azureCluster.Namespace,
 		Name:       azureCluster.Name,
 		APIVersion: azureCluster.APIVersion,
 	}
-	kcp.Spec.InfrastructureTemplate = v12.ObjectReference{
+	kcp.Spec.InfrastructureTemplate = corev1.ObjectReference{
 		Kind:       azureMachineTemplate.Kind,
 		Namespace:  azureMachineTemplate.Namespace,
 		Name:       azureMachineTemplate.Name,
@@ -386,11 +386,11 @@ func newAzureMachinePool(cluster, name string) *capzexp.AzureMachinePool {
 		//   be invalid because when `reference.GetReference` sees an empty GVK it tries
 		//   to look it up but fails because testenv is not fully initialised; i.e. test
 		//   if this is necessary if we initialise the manager in `suite_test.go`
-		TypeMeta: v1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       "AzureMachinePool",
 			APIVersion: "exp.infrastructure.cluster.x-k8s.io/v1alpha3",
 		},
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 			Labels: map[string]string{
@@ -409,7 +409,7 @@ func newAzureMachinePool(cluster, name string) *capzexp.AzureMachinePool {
 func newMachinePool(cluster string) *capiexp.MachinePool {
 	name := fmt.Sprintf("%s-mp-%s", cluster, util.RandomString(4))
 	return &capiexp.MachinePool{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      name,
 			Labels: map[string]string{
@@ -433,7 +433,7 @@ func newAzureMachinePoolChain(cluster string) (*capiexp.MachinePool, *capzexp.Az
 	mp := newMachinePool(cluster)
 	amp := newAzureMachinePool(cluster, mp.Name)
 
-	mp.Spec.Template.Spec.InfrastructureRef = v12.ObjectReference{
+	mp.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
 		Kind:       amp.Kind,
 		Name:       amp.Name,
 		APIVersion: amp.APIVersion,
