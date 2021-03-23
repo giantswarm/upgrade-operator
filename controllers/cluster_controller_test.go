@@ -46,7 +46,7 @@ func TestUpgradeK8sVersion(t *testing.T) {
 				{Name: capiReleaseComponent, Version: "0.3.14"},
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
-				{Name: "image", Version: "18.04.0"},
+				{Name: "image", Version: "18.4.0"},
 			},
 		},
 	}
