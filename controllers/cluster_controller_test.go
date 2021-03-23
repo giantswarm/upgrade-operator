@@ -3,8 +3,9 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/tools/reference"
 	"testing"
+
+	"k8s.io/client-go/tools/reference"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"

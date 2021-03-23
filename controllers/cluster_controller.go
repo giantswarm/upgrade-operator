@@ -19,10 +19,11 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/Azure/go-autorest/autorest/to"
 	corev1 "k8s.io/api/core/v1"
 	cabpk "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
-	"strings"
 
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	"github.com/giantswarm/apiextensions/pkg/label"
