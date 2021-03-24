@@ -251,8 +251,8 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 	if expectedMachineImage != currentMachineImage || expectedK8sVersion != kcp.Spec.Version {
 		controlPlaneNodesWillBeRolled = true
 
-		logger.Info("Cluster needs to be upgraded and control planes will be rolled", "currentK8sVersion", kcp.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
-		logger.Info("Cloning infrastructure template and changing its machine image")
+		logger.Info("Control Plane needs to be upgraded and control plane nodes will be rolled", "currentK8sVersion", kcp.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
+		logger.Info("Cloning current referenced infrastructure template changing its machine image", "currentMachineTemplate", kcp.Spec.InfrastructureTemplate.Name)
 
 		// Clone infrastructure machine template to new object.
 		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, &kcp.Spec.InfrastructureTemplate, kcp.Namespace, kcp.Name)
@@ -375,7 +375,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 	}
 
 	// Update MachineDeployment label with CAPI release number.
-	logger.Info("Setting MachineDeployment watch filter label")
+	logger.Info("Ensuring MachineDeployment watch filter label", "before", machineDeployment.Labels[CAPIWatchFilterLabel], "now", expectedCAPIVersion)
 	machineDeployment.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
 
 	// Create new MachineTemplate and update MachineDeployment to use it, if updating k8s.
@@ -384,11 +384,12 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 		return false, errors.Wrapf(err, "failed to read current machine image from infrastructure machine template %q", infraMachineTemplate.GetName())
 	}
 
+	logger.Info("Checking if MachineDeployment needs to be upgraded and nodes rolled out due to the k8s or OS version", "currentK8sVersion", machineDeployment.Spec.Template.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
 	if expectedMachineImage != currentMachineImage || expectedK8sVersion != *machineDeployment.Spec.Template.Spec.Version {
 		workerNodesWillBeRolled = true
 
-		logger.Info("MachineDeployment worker nodes need to be upgraded and nodes will be rolled", "currentK8sVersion", machineDeployment.Spec.Template.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
-		logger.Info("Cloning infrastructure template and changing its machine image")
+		logger.Info("MachineDeployment needs to be upgraded and nodes will be rolled")
+		logger.Info("Cloning current referenced infrastructure template changing its machine image", "currentMachineTemplate", machineDeployment.Spec.Template.Spec.InfrastructureRef.Name)
 
 		// Clone infrastructure machine template to new object.
 		newInfrastructureMachineTemplate, err := r.CloneTemplate(ctx, infraMachineTemplateReference, machineDeployment.Namespace, machineDeployment.Name)
@@ -426,6 +427,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 			return false, errors.Wrapf(err, "failed to update KubeadmConfigTemplate %q", kubeadmconfigtemplate.Name)
 		}
 
+		logger.Info("Changing MachineDeployment k8s version and Machine Template reference to point to new Machine Template", "currentMachineTemplate", machineDeployment.Spec.Template.Spec.InfrastructureRef.Name, "newMachineTemplate", newInfrastructureMachineTemplate.GetName())
 		machineDeployment.Spec.Template.Spec.InfrastructureRef.Name = newInfrastructureMachineTemplate.GetName()
 		machineDeployment.Spec.Template.Spec.Version = to.StringPtr(expectedK8sVersion)
 	}
@@ -459,17 +461,22 @@ func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *ca
 // upgradeMachineDeployments will fetch the MachineDeployments for the given
 // cluster and try to upgrade k8s and OS, setting the right labels.
 func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
+	logger := r.Log.WithValues("cluster", cluster.Name)
+
+	logger.Info("Fetching the cluster MachineDeployments")
 	clusterMachineDeployments, err := r.getSortedClusterMachineDeployments(ctx, cluster)
 	if err != nil {
 		return err
 	}
 
+	logger.Info("Looping through the MachineDeployments to see if they need to be upgraded", "numberOfMachineDeployments", len(clusterMachineDeployments))
 	for _, machineDeployment := range clusterMachineDeployments {
 		_, err = r.upgradeMachineDeployment(ctx, cluster, &machineDeployment, giantswarmRelease)
 		if err != nil {
 			return err
 		}
 	}
+	logger.Info("Finished looping through the MachineDeployments")
 
 	return nil
 }
