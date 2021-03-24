@@ -23,6 +23,7 @@ import (
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	capz "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
+	cabpk "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	capiexp "sigs.k8s.io/cluster-api/exp/api/v1alpha3"
 
@@ -50,6 +51,7 @@ func init() {
 	_ = capiexp.AddToScheme(scheme)
 	_ = capz.AddToScheme(scheme)
 	_ = capzexp.AddToScheme(scheme)
+	_ = cabpk.AddToScheme(scheme)
 	_ = releaseapiextensions.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
