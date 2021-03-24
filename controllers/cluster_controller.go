@@ -95,10 +95,8 @@ type ClusterReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=cluster.x-k8s.io;infrastructure.cluster.x-k8s.io,resources=clusters;clusters/status;awsclusters;awsclusters/status;awsmachinetemplates;azureclusters;azureclusters/status;azuremachinetemplates,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io;infrastructure.cluster.x-k8s.io;controlplane.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io;exp.infrastructure.cluster.x-k8s.io;exp.cluster.x-k8s.io,resources=clusters;clusters/status;machinedeployments;machinedeployments/status;kubeadmcontrolplanes;kubeadmconfigtemplates;awsclusters;awsclusters/status;awsmachinetemplates;azureclusters;azureclusters/status;azuremachinetemplates;machinepools;machinepools/status;awsmachinepools;awsmachinepools/status;azuremachinepools;azuremachinepools/status,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=awsmachinetemplates;azuremachinetemplates,verbs=create
-// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=exp.infrastructure.cluster.x-k8s.io;exp.cluster.x-k8s.io,resources=machinepools;machinepools/status;awsmachinepools;awsmachinepools/status;azuremachinepools;azuremachinepools/status,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=release.giantswarm.io,resources=releases,verbs=get;list;watch
 
 func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
