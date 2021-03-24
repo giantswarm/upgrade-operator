@@ -317,7 +317,7 @@ func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *cap
 	// trigger an upgrade while something is wrong or another upgrade is in
 	// progress.
 	if !isReady(machinePool) {
-		logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading workers")
+		logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading machine pools")
 		return false, nil
 	} else if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
 		logger.Info("The MachinePool is out of date. Updating the MachinePool and its infrastructure Machine Pool", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
@@ -414,7 +414,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 		kubeadmconfigtemplate := &cabpk.KubeadmConfigTemplate{}
 		err = r.Client.Get(ctx, client.ObjectKey{Namespace: machineDeployment.Namespace, Name: machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name}, kubeadmconfigtemplate)
 		if err != nil {
-			return false, errors.Wrapf(err, "failed to retrieve workers bootstrap KubeadmConfigTemplate %q", machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name)
+			return false, errors.Wrapf(err, "failed to retrieve machine deployment bootstrap KubeadmConfigTemplate %q", machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name)
 		}
 
 		for _, file := range kubeadmconfigtemplate.Spec.Template.Spec.Files {
