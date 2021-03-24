@@ -412,7 +412,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 		// * Reference to the infrastructure machine template.
 		// * K8s version in the control plane object.
 		kubeadmconfigtemplate := &cabpk.KubeadmConfigTemplate{}
-		err = r.Client.Get(ctx, client.ObjectKey{Namespace: machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Namespace, Name: machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name}, kubeadmconfigtemplate)
+		err = r.Client.Get(ctx, client.ObjectKey{Namespace: machineDeployment.Namespace, Name: machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name}, kubeadmconfigtemplate)
 		if err != nil {
 			return false, errors.Wrapf(err, "failed to retrieve workers bootstrap KubeadmConfigTemplate %q", machineDeployment.Spec.Template.Spec.Bootstrap.ConfigRef.Name)
 		}
