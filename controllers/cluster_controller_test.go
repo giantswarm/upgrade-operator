@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-func TestUpgradeK8sVersion(t *testing.T) {
+func TestUpgradeControlPlaneK8sVersion(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
 	_ = capi.AddToScheme(scheme)
@@ -120,7 +120,7 @@ func TestUpgradeK8sVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, "v0.3.14", reconciledMachinePool1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in MachinePool %q", CAPIWatchFilterLabel, reconciledMachinePool1.Name))
+	assert.Equal(t, "v0.3.10", reconciledMachinePool1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q got updated in MachinePool %q but it shouldn't when ControlPlane is upgrading", CAPIWatchFilterLabel, reconciledMachinePool1.Name))
 
 	// Assert CAPZ CR's are labeled correctly.
 	reconciledAzureCluster := &capz.AzureCluster{}
@@ -129,22 +129,235 @@ func TestUpgradeK8sVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "v0.4.12", reconciledAzureCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureCluster %q", CAPIWatchFilterLabel, reconciledAzureCluster.Name))
+
 	reconciledAzureMachinePool1 := &capzexp.AzureMachinePool{}
 	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: azureMachinePool1.Namespace, Name: azureMachinePool1.Name}, reconciledAzureMachinePool1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, "v0.4.12", reconciledAzureMachinePool1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureMachinePool %q", CAPIWatchFilterLabel, reconciledAzureMachinePool1.Name))
+	assert.Equal(t, "v0.4.10", reconciledAzureMachinePool1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q got updated in AzureMachinePool %q but it shouldn't when ControlPlane is upgrading", CAPIWatchFilterLabel, reconciledAzureMachinePool1.Name))
 	reconciledAzureMachinePool2 := &capzexp.AzureMachinePool{}
 	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: azureMachinePool2.Namespace, Name: azureMachinePool2.Name}, reconciledAzureMachinePool2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "v0.4.10", reconciledAzureMachinePool2.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureMachinePool %q", CAPIWatchFilterLabel, reconciledAzureMachinePool2.Name))
-	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, fmt.Sprintf("AzureMachinePool %s is wrong", reconciledAzureMachinePool1.Name))
+	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1804", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, fmt.Sprintf("AzureMachinePool %s machine image shouldn't have changed", reconciledAzureMachinePool1.Name))
 }
 
-func TestUpgradeK8sVersionWithMachineDeployments(t *testing.T) {
+func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = capi.AddToScheme(scheme)
+	_ = capiexp.AddToScheme(scheme)
+	_ = capz.AddToScheme(scheme)
+	_ = capzexp.AddToScheme(scheme)
+	_ = kcp.AddToScheme(scheme)
+	_ = releaseapiextensions.AddToScheme(scheme)
+
+	release10dot0 := &releaseapiextensions.Release{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "v10.0.0",
+		},
+		Spec: releaseapiextensions.ReleaseSpec{
+			Components: []releaseapiextensions.ReleaseSpecComponent{
+				{Name: "kubernetes", Version: "1.18.14"},
+				{Name: capiReleaseComponent, Version: "0.3.14"},
+				{Name: cacpReleaseComponent, Version: "0.3.14"},
+				{Name: capzReleaseComponent, Version: "0.4.12"},
+				{Name: "image", Version: "18.4.0"},
+			},
+		},
+	}
+
+	cpAzureMachineTemplate := &capz.AzureMachineTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster-control-plane-1a2b3c",
+			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
+		},
+		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
+			Image: &capz.Image{
+				Marketplace: &capz.AzureMarketplaceImage{
+					Publisher: "cncf-upstream",
+					Offer:     "capi",
+					SKU:       "k8s-1dot18dot14-ubuntu-1804",
+					Version:   "latest",
+				},
+			},
+		}}},
+	}
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kubeadmcontrolplane := &kcp.KubeadmControlPlane{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster-control-plane-1-18-14",
+			Labels: map[string]string{
+				cacpReleaseComponent:  "v0.3.14",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: kcp.KubeadmControlPlaneSpec{
+			Replicas:               to.Int32Ptr(1),
+			Version:                "v1.18.14",
+			InfrastructureTemplate: *cpAzureMachineTemplateReference,
+			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				Files: []cabpk.File{
+					{
+						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
+					},
+				},
+			},
+		},
+		Status: kcp.KubeadmControlPlaneStatus{
+			Conditions: capi.Conditions{capi.Condition{
+				Type:   capi.ReadyCondition,
+				Status: corev1.ConditionTrue,
+			}},
+		},
+	}
+
+	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	azureCluster := &capz.AzureCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster",
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "v0.4.12",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: capz.AzureClusterSpec{
+			ResourceGroup: "",
+		},
+	}
+	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster := &capi.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster",
+			Labels: map[string]string{
+				apiextensionslabel.ReleaseVersion: "v10.0.0",
+				CAPIWatchFilterLabel:              "v0.3.14",
+			},
+		},
+		Spec: capi.ClusterSpec{
+			ControlPlaneRef:   kcpReference,
+			InfrastructureRef: azureClusterReference,
+		},
+	}
+
+	machinePool1, azureMachinePool1 := newAzureMachinePoolChain(cluster.Name)
+
+	machinePool1.Status = capiexp.MachinePoolStatus{
+		Conditions: capi.Conditions{capi.Condition{
+			Type:   capi.ReadyCondition,
+			Status: corev1.ConditionTrue,
+		}},
+	}
+
+	machinePool2, azureMachinePool2 := newAzureMachinePoolChain(cluster.Name)
+
+	machinePool2.Status = capiexp.MachinePoolStatus{
+		Conditions: capi.Conditions{capi.Condition{
+			Type:   capi.ReadyCondition,
+			Status: corev1.ConditionTrue,
+		}},
+	}
+
+	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, azureMachinePool1, machinePool1, azureMachinePool2, machinePool2)
+
+	reconciler := ClusterReconciler{
+		Client: ctrlClient,
+		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
+		Scheme: scheme,
+	}
+
+	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert KubeadmControlPlane version and label were updated.
+	reconciledControlplane := &kcp.KubeadmControlPlane{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: kubeadmcontrolplane.Namespace, Name: kubeadmcontrolplane.Name}, reconciledControlplane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v1.18.14", reconciledControlplane.Spec.Version, fmt.Sprintf("KubeadmControlPlane %q has wrong k8s version in KubeadmControlPlane.Spec.Version field", reconciledControlplane.Name))
+	assert.Equal(t, "v0.3.14", reconciledControlplane.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in KubeadmControlPlane %q", CAPIWatchFilterLabel, reconciledControlplane.Name))
+
+	foundProviderFile := false
+	expectedProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
+	for _, file := range reconciledControlplane.Spec.KubeadmConfigSpec.Files {
+		if file.ContentFrom.Secret.Name == expectedProviderFile {
+			foundProviderFile = true
+		}
+	}
+	if !foundProviderFile {
+		t.Fatalf("None of the defined files match the infrastructure machine template name. The name of the provider file needs to match the infrastructure machine template name, got these files %v, expected name %q", reconciledControlplane.Spec.KubeadmConfigSpec.Files, expectedProviderFile)
+	}
+
+	// Assert AzureMachineTemplate used by KubeadmControlPlane uses right machine image.
+	newAzureMachineTemplate := &capz.AzureMachineTemplate{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledControlplane.Spec.InfrastructureTemplate.Namespace, Name: reconciledControlplane.Spec.InfrastructureTemplate.Name}, newAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", newAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, fmt.Sprintf("AzureMachineTemplate %q image is wrong", newAzureMachineTemplate.Name))
+
+	// Assert CAPI CR's are labeled correctly.
+	reconciledCluster := &capi.Cluster{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, reconciledCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.3.14", reconciledCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in Cluster %q", CAPIWatchFilterLabel, reconciledCluster.Name))
+
+	reconciledMachinePool1 := &capiexp.MachinePool{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: machinePool1.Namespace, Name: machinePool1.Name}, reconciledMachinePool1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.3.14", reconciledMachinePool1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q should have been updated in MachinePool %q to new operator version", CAPIWatchFilterLabel, reconciledMachinePool1.Name))
+
+	// Assert CAPZ CR's are labeled correctly.
+	reconciledAzureCluster := &capz.AzureCluster{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: azureCluster.Namespace, Name: azureCluster.Name}, reconciledAzureCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.4.12", reconciledAzureCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q should have been updated in MachinePool %q to new operator version", CAPIWatchFilterLabel, reconciledAzureCluster.Name))
+
+	reconciledAzureMachinePool1 := &capzexp.AzureMachinePool{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: azureMachinePool1.Namespace, Name: azureMachinePool1.Name}, reconciledAzureMachinePool1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.4.12", reconciledAzureMachinePool1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q should have been updated in MachinePool %q to new operator version", CAPIWatchFilterLabel, reconciledAzureMachinePool1.Name))
+	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, fmt.Sprintf("AzureMachinePool %s machine image should have been updated to new k8s version", reconciledAzureMachinePool1.Name))
+
+	reconciledAzureMachinePool2 := &capzexp.AzureMachinePool{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: azureMachinePool2.Namespace, Name: azureMachinePool2.Name}, reconciledAzureMachinePool2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "v0.4.12", reconciledAzureMachinePool2.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureMachinePool %q", CAPIWatchFilterLabel, reconciledAzureMachinePool2.Name))
+	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", reconciledAzureMachinePool2.Spec.Template.Image.Marketplace.SKU, fmt.Sprintf("AzureMachinePool %s machine image should have been updated to new k8s version", reconciledAzureMachinePool2.Name))
+}
+
+func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
 	_ = capi.AddToScheme(scheme)
@@ -382,8 +595,8 @@ func TestUpgradeK8sVersionWithMachineDeployments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, "v0.3.14", reconciledMachineDeployment1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in MachineDeployment %q", CAPIWatchFilterLabel, reconciledMachineDeployment1.Name))
-	assert.Equal(t, "v1.18.14", *reconciledMachineDeployment1.Spec.Template.Spec.Version, fmt.Sprintf("MachineDeployment %q has wrong k8s version in MachineDeployment.Spec.Template.Spec.Version field", reconciledMachineDeployment1.Name))
+	assert.Equal(t, "v0.3.10", reconciledMachineDeployment1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q got updated in MachineDeployment %q but shouldn't because control plane is being upgraded", CAPIWatchFilterLabel, reconciledMachineDeployment1.Name))
+	assert.Equal(t, "v1.18.2", *reconciledMachineDeployment1.Spec.Template.Spec.Version, fmt.Sprintf("MachineDeployment %q k8s version was upgraded in its MachineDeployment.Spec.Template.Spec.Version field but shouldn't because control plane is being upgraded", reconciledMachineDeployment1.Name))
 
 	reconciledKubeadmconfigTemplate := &cabpk.KubeadmConfigTemplate{}
 	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledMachineDeployment1.Spec.Template.Spec.Bootstrap.ConfigRef.Namespace, Name: reconciledMachineDeployment1.Spec.Template.Spec.Bootstrap.ConfigRef.Name}, reconciledKubeadmconfigTemplate)
@@ -410,7 +623,7 @@ func TestUpgradeK8sVersionWithMachineDeployments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, "k8s-1dot18dot14-ubuntu-1804", newWorkersAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, fmt.Sprintf("Workers AzureMachineTemplate %q image is wrong", newWorkersAzureMachineTemplate.Name))
+	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1804", newWorkersAzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, fmt.Sprintf("Workers AzureMachineTemplate %q image was upgraded but shouldn't because control plane is being upgraded", newWorkersAzureMachineTemplate.Name))
 
 	// Assert CAPZ CR's are labeled correctly.
 	reconciledAzureCluster := &capz.AzureCluster{}
@@ -421,7 +634,7 @@ func TestUpgradeK8sVersionWithMachineDeployments(t *testing.T) {
 	assert.Equal(t, "v0.4.12", reconciledAzureCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureCluster %q", CAPIWatchFilterLabel, reconciledAzureCluster.Name))
 }
 
-func TestUpgradeOSVersion(t *testing.T) {
+func TestUpgradeControlPlaneOSVersion(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
 	_ = capi.AddToScheme(scheme)
@@ -505,7 +718,7 @@ func TestUpgradeOSVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1810", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "AzureMachinePool image is wrong")
+	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1804", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "AzureMachinePool image got upgraded but shouldn't because control plane is being upgraded")
 }
 
 // HELPERS

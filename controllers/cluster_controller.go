@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	corev1 "k8s.io/api/core/v1"
@@ -121,31 +122,31 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	_, err = r.upgradeControlPlane(ctx, cluster, kcp, giantswarmRelease)
+	controlPlaneNodesWillBeRolled, err := r.upgradeControlPlane(ctx, cluster, kcp, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q control plane", cluster.Name)
 	}
 
 	// If control plane nodes will be rolled, let's return so that status and
 	// conditions are applied correctly before continuing.
-	//if controlPlaneNodesWillBeRolled {
-	//	return ctrl.Result{}, nil
-	//}
+	if controlPlaneNodesWillBeRolled {
+		return ctrl.Result{}, nil
+	}
 
 	// Maybe control plane was upgraded in previous reconciliation and it's not
 	// done yet, or is just having issues. Let's wait.
 	if !isReady(kcp) {
 		logger.Info("Control plane is not ready, let's wait before upgrading the workers")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
 	err = r.upgradeWorkers(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q workers", cluster.Name)
 	}
