@@ -107,6 +107,10 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to get reconciled Cluster %q", req.Name)
 	}
 
+	if cluster.Status.GetTypedPhase() != capi.ClusterPhaseProvisioned {
+		logger.V(2).Info("Cluster not provisioned, skipping")
+	}
+
 	kcp := &capikcp.KubeadmControlPlane{}
 	err = r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Spec.ControlPlaneRef.Namespace, Name: cluster.Spec.ControlPlaneRef.Name}, kcp)
 	if err != nil {
@@ -124,6 +128,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
 		return ctrl.Result{}, nil
 	} else if err != nil {
+		logger.V(2).Info("upgradeControlPlane error is not a conflict, or is it?", "type", fmt.Sprintf("%T", err), "reasonForError", apierrors.ReasonForError(err))
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q control plane", cluster.Name)
 	}
 
@@ -176,6 +181,7 @@ func (r *ClusterReconciler) CloneTemplate(ctx context.Context, kcp *capikcp.Kube
 	to.SetAPIVersion(infrastructureMachineTemplate.GetAPIVersion())
 	to.SetKind(infrastructureMachineTemplate.GetKind())
 
+	r.Log.Info("cloned infrastructure machine template", "from", infrastructureMachineTemplate.GetName(), "to", to.GetName())
 	return to, nil
 }
 
@@ -246,8 +252,26 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 			return false, errors.Wrapf(err, "failed to build infrastructure template from %q", kcp.Spec.InfrastructureTemplate.Name)
 		}
 
+		imagePath := strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")
+		for i := 1; i < len(imagePath); i++ {
+			parent := imagePath[0:i]
+			parentStr := strings.Join(parent, ".")
+			if _, found, err := unstructured.NestedFieldNoCopy(newInfrastructureMachineTemplate.Object, parent...); err != nil {
+				return false, errors.Wrapf(err, "failed to access `%s` in infrastructure template object %q", parentStr, newInfrastructureMachineTemplate.GetName())
+			} else if !found {
+				logger.Info("key not found in infrastructure machine template, defaulting", "infrastructureMachineTemplate", newInfrastructureMachineTemplate.GetName(), "key", parentStr)
+				if err = unstructured.SetNestedMap(newInfrastructureMachineTemplate.Object, map[string]interface{}{}, parent...); err != nil {
+					return false, errors.Wrapf(err, "failed to set `%s` in infrastructure machine template %q", parentStr, newInfrastructureMachineTemplate.GetName())
+				} else {
+					logger.Info("added key to infrastructure machine template", "infrastructureMachineTemplate", newInfrastructureMachineTemplate.GetName(), "key", parentStr)
+				}
+			} else {
+				logger.Info("key already in infrastructure machine template", "infrastructureMachineTemplate", newInfrastructureMachineTemplate.GetName(), "key", parentStr)
+			}
+		}
+
 		// Update machine template machine image to upgrade k8s or the OS.
-		if err := unstructured.SetNestedField(newInfrastructureMachineTemplate.Object, expectedMachineImage, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...); err != nil {
+		if err := unstructured.SetNestedField(newInfrastructureMachineTemplate.Object, expectedMachineImage, imagePath...); err != nil {
 			return false, errors.Wrapf(err, "failed to set infrastructure template %q image to %q", kcp.Spec.InfrastructureTemplate.Name, expectedMachineImage)
 		}
 

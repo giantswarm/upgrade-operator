@@ -216,6 +216,61 @@ func TestUpgradeOSVersion(t *testing.T) {
 	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1810", reconciledAzureMachinePool1.Spec.Template.Image.Marketplace.SKU, "AzureMachinePool image is wrong")
 }
 
+func TestUpgradeHandlesEmptyImageSpec(t *testing.T) {
+	ctx := context.Background()
+
+	release10dot0 := &releaseapiextensions.Release{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "v10.0.0",
+		},
+		Spec: releaseapiextensions.ReleaseSpec{
+			Components: []releaseapiextensions.ReleaseSpecComponent{
+				{Name: "kubernetes", Version: "1.18.2"},
+				{Name: capiReleaseComponent, Version: "0.3.14"},
+				{Name: cacpReleaseComponent, Version: "0.3.14"},
+				{Name: capzReleaseComponent, Version: "0.4.12"},
+				{Name: "image", Version: "18.10.0"},
+			},
+		},
+	}
+
+	cluster, kubeadmcontrolplane, azureCluster, azureMachineTemplate := newAzureClusterWithControlPlane()
+
+	// image can be nil in which case CAPI controller uses defaults
+	azureMachineTemplate.Spec.Template.Spec.Image = nil
+
+	ctrlClient := newFakeClient(release10dot0, azureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster)
+
+	reconciler := ClusterReconciler{
+		Client: ctrlClient,
+		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
+		Scheme: scheme.Scheme,
+	}
+
+	assert := assert.New(t)
+
+	_, err := reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}})
+	assert.NoError(err)
+
+	reconciledControlplane := &kcp.KubeadmControlPlane{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: kubeadmcontrolplane.Namespace, Name: kubeadmcontrolplane.Name}, reconciledControlplane)
+	assert.NoError(err)
+
+	newAzureMachineTemplate := &capz.AzureMachineTemplate{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: reconciledControlplane.Spec.InfrastructureTemplate.Namespace, Name: reconciledControlplane.Spec.InfrastructureTemplate.Name}, newAzureMachineTemplate)
+	assert.NoError(err)
+
+	// assert that reconciler populates the defaults if they were not specified
+	if image := newAzureMachineTemplate.Spec.Template.Spec.Image; assert.NotNil(image) {
+		if assert.NotNil(image.Marketplace) {
+			assert.Equal("cncf-upstream", image.Marketplace.Publisher)
+			assert.Equal("capi", image.Marketplace.Offer)
+			assert.Equal("k8s-1dot18dot2-ubuntu-1804", image.Marketplace.SKU)
+			assert.Equal("latest", image.Marketplace.Version)
+		}
+	}
+}
+
 // HELPERS
 
 func newFakeClient(initObjs ...runtime.Object) client.Client {
