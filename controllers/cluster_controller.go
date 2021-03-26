@@ -143,12 +143,15 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	err = r.upgradeWorkers(ctx, cluster, giantswarmRelease)
+	nodesAreBeingRolled, err := r.upgradeWorkers(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q workers", cluster.Name)
+	} else if nodesAreBeingRolled {
+		logger.Info("Worker nodes are being rolled out, let's wait before upgrading the next node pool")
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -367,7 +370,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 
 	infraMachineTemplateReference := &machineDeployment.Spec.Template.Spec.InfrastructureRef
 
-	workerNodesWillBeRolled := false
+	nodesWillBeRolled := false
 
 	// Fetch infrastructure machine template for the machine deployment.
 	infraMachineTemplate, err := external.Get(ctx, r.Client, infraMachineTemplateReference, cluster.Namespace)
@@ -387,7 +390,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 
 	logger.Info("Checking if MachineDeployment needs to be upgraded and nodes rolled out due to the k8s or OS version", "currentK8sVersion", machineDeployment.Spec.Template.Spec.Version, "expectedK8sVersion", expectedK8sVersion, "currentMachineImage", currentMachineImage, "expectedMachineImage", expectedMachineImage)
 	if expectedMachineImage != currentMachineImage || expectedK8sVersion != *machineDeployment.Spec.Template.Spec.Version {
-		workerNodesWillBeRolled = true
+		nodesWillBeRolled = true
 
 		logger.Info("MachineDeployment needs to be upgraded and nodes will be rolled")
 		logger.Info("Cloning current referenced infrastructure template changing its machine image", "currentMachineTemplate", machineDeployment.Spec.Template.Spec.InfrastructureRef.Name)
@@ -438,65 +441,74 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 		return false, errors.Wrapf(err, "failed to update MachineDeployment %q", machineDeployment.Name)
 	}
 
-	return workerNodesWillBeRolled, nil
+	return nodesWillBeRolled, nil
 }
 
 // upgradeMachinePools will fetch the MachinePools for the given cluster and
 // try to upgrade k8s and OS, setting the right labels.
-func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
+func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
 	clusterMachinePools, err := r.getSortedClusterMachinePools(ctx, cluster)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	for _, machinePool := range clusterMachinePools {
-		_, err = r.upgradeMachinePool(ctx, cluster, &machinePool, giantswarmRelease)
+		nodesWillBeRolled, err := r.upgradeMachinePool(ctx, cluster, &machinePool, giantswarmRelease)
 		if err != nil {
-			return err
+			return false, err
+		}
+
+		if nodesWillBeRolled {
+			return true, nil
 		}
 	}
 
-	return nil
+	return false, nil
 }
 
 // upgradeMachineDeployments will fetch the MachineDeployments for the given
 // cluster and try to upgrade k8s and OS, setting the right labels.
-func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
+func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
 	logger := r.Log.WithValues("cluster", cluster.Name)
 
 	logger.Info("Fetching the cluster MachineDeployments")
 	clusterMachineDeployments, err := r.getSortedClusterMachineDeployments(ctx, cluster)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	logger.Info("Looping through the MachineDeployments to see if they need to be upgraded", "numberOfMachineDeployments", len(clusterMachineDeployments))
 	for _, machineDeployment := range clusterMachineDeployments {
-		_, err = r.upgradeMachineDeployment(ctx, cluster, &machineDeployment, giantswarmRelease)
+		waitBeforeUpgradingNext, err := r.upgradeMachineDeployment(ctx, cluster, &machineDeployment, giantswarmRelease)
 		if err != nil {
-			return err
+			return false, err
+		}
+
+		if waitBeforeUpgradingNext {
+			return true, nil
 		}
 	}
+
 	logger.Info("Finished looping through the MachineDeployments")
 
-	return nil
+	return false, nil
 }
 
 // upgradeWorkers will upgrade both MachinePools and MachineDeployments.
 // While it's technically possible for a cluster to have both types of node
 // pools, we assume no cluster would have both at the same time.
-func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) error {
-	err := r.upgradeMachinePools(ctx, cluster, giantswarmRelease)
+func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
+	machinePoolsAreBeingRolled, err := r.upgradeMachinePools(ctx, cluster, giantswarmRelease)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	err = r.upgradeMachineDeployments(ctx, cluster, giantswarmRelease)
+	machineDeploymentsAreBeingRolled, err := r.upgradeMachineDeployments(ctx, cluster, giantswarmRelease)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return machinePoolsAreBeingRolled || machineDeploymentsAreBeingRolled, nil
 }
 
 func isReady(obj capiconditions.Getter) bool {
