@@ -322,7 +322,7 @@ func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *cap
 	// progress.
 	if !isReady(machinePool) {
 		logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading machine pools")
-		return false, nil
+		return true, nil
 	} else if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
 		logger.Info("The MachinePool is out of date. Updating the MachinePool and its infrastructure Machine Pool", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
 		machinePool.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
