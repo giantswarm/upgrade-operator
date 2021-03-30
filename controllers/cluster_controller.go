@@ -102,7 +102,6 @@ type ClusterReconciler struct {
 
 func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	logger := r.Log.WithValues("cluster", req.NamespacedName)
 
 	cluster := &capi.Cluster{}
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, cluster)
@@ -122,6 +121,8 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
+	logger := r.Log.WithValues("cluster", req.NamespacedName, "kubeadmcontrolplane", cluster.Spec.ControlPlaneRef.Name)
+
 	controlPlaneNodesWillBeRolled, err := r.upgradeControlPlane(ctx, cluster, kcp, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
@@ -134,7 +135,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	// conditions are applied correctly before continuing.
 	if controlPlaneNodesWillBeRolled {
 		logger.Info("Let's wait for the next reconciliation before upgrading node pools")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
 	// Maybe control plane was upgraded in previous reconciliation and it's not
