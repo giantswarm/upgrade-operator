@@ -317,13 +317,7 @@ func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *cap
 		return false, errors.Wrapf(err, "failed to read current machine image from infrastructure machine pool template %q", infraMachinePool.GetName())
 	}
 
-	// If any MachinePool is not ready we exit because we don't want to
-	// trigger an upgrade while something is wrong or another upgrade is in
-	// progress.
-	if !isReady(machinePool) {
-		logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading machine pools")
-		return true, nil
-	} else if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
+	if currentMachineImage != expectedMachineImage || *machinePool.Spec.Template.Spec.Version != expectedK8sVersion || machinePool.Labels[CAPIWatchFilterLabel] != expectedCAPIVersion {
 		logger.Info("The MachinePool is out of date. Updating the MachinePool and its infrastructure Machine Pool", "expectedK8sVersion", expectedK8sVersion, "currentK8sVersion", *machinePool.Spec.Template.Spec.Version, "expectedMachineImage", expectedMachineImage, "currentMachineImage", currentMachineImage, "expectedWatchFilterLabel", expectedCAPIVersion, "currentWatchFilterLabel", machinePool.Labels[CAPIWatchFilterLabel])
 		machinePool.Labels[CAPIWatchFilterLabel] = expectedCAPIVersion
 		machinePool.Spec.Template.Spec.Version = &expectedK8sVersion
@@ -453,6 +447,16 @@ func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *ca
 	}
 
 	for _, machinePool := range clusterMachinePools {
+		logger := r.Log.WithValues("cluster", cluster.Name, "machinepool", machinePool.Name)
+
+		// If a MachinePool is not ready we exit because we don't want to
+		// trigger an upgrade while something is wrong or another upgrade is in
+		// progress.
+		if !isReady(&machinePool) {
+			logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading machine pools")
+			return true, nil
+		}
+
 		nodesWillBeRolled, err := r.upgradeMachinePool(ctx, cluster, &machinePool, giantswarmRelease)
 		if err != nil {
 			return false, err
@@ -479,6 +483,14 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 
 	logger.Info("Looping through the MachineDeployments to see if they need to be upgraded", "numberOfMachineDeployments", len(clusterMachineDeployments))
 	for _, machineDeployment := range clusterMachineDeployments {
+		// If a MachineDeployment is not 'Running' we exit because we don't want to
+		// trigger an upgrade while something is wrong or another upgrade is in
+		// progress.
+		if machineDeployment.Status.Phase != "Running" {
+			logger.Info("The MachineDeployment is being rolled. Let's wait before trying to continue upgrading machine deployments")
+			return true, nil
+		}
+
 		waitBeforeUpgradingNext, err := r.upgradeMachineDeployment(ctx, cluster, &machineDeployment, giantswarmRelease)
 		if err != nil {
 			return false, err
@@ -495,8 +507,8 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 }
 
 // upgradeWorkers will upgrade both MachinePools and MachineDeployments.
-// While it's technically possible for a cluster to have both types of node
-// pools, we assume no cluster would have both at the same time.
+// While it's unlikely the cluster would have both types of node pools, it's
+// still technically possible and so it is supported.
 func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
 	machinePoolsAreBeingRolled, err := r.upgradeMachinePools(ctx, cluster, giantswarmRelease)
 	if err != nil {
