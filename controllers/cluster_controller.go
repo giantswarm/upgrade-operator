@@ -566,10 +566,6 @@ func setCAPIWatchFilterLabel(infraReference *unstructured.Unstructured, release 
 	)
 }
 
-func MachineTemplateNameFromCluster(cluster *capi.Cluster, k8sVersion, osVersion string) string {
-	return fmt.Sprintf("%s-control-plane-k8s-%s-flatcar-%s", cluster.Name, strings.ReplaceAll(k8sVersion, ".", "dot"), strings.ReplaceAll(osVersion, ".", "dot"))
-}
-
 // merge returns a new map with values from both input maps
 // Second map would overwrite values from first map.
 func merge(map1, map2 map[string]string) map[string]string {
