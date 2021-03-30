@@ -139,8 +139,6 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	logger.Info("Control Plane doesn't need to be upgraded")
-
 	// Maybe control plane was upgraded in previous reconciliation and it's not
 	// done yet, or is just having issues. Let's wait.
 	if !isReady(kcp) {
@@ -148,7 +146,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	logger.Info("Control Plane is 'Ready'")
+	logger.Info("Control Plane is 'Ready' and up to date. Let's check the workers")
 
 	nodesAreBeingRolled, err := r.upgradeWorkers(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
@@ -494,7 +492,7 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 		// trigger an upgrade while something is wrong or another upgrade is in
 		// progress.
 		if !mdutil.DeploymentComplete(&machineDeployment, &machineDeployment.Status) {
-			logger.Info("The MachineDeployment is being rolled. Let's wait before trying to continue upgrading machine deployments")
+			logger.Info("MachineDeployment is currently being rolled", "machineDeployment", machineDeployment.Name)
 			return true, nil
 		}
 
