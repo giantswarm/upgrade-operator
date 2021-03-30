@@ -133,6 +133,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	// If control plane nodes will be rolled, let's return so that status and
 	// conditions are applied correctly before continuing.
 	if controlPlaneNodesWillBeRolled {
+		logger.Info("Let's wait for the next reconciliation before upgrading node pools")
 		return ctrl.Result{}, nil
 	}
 
