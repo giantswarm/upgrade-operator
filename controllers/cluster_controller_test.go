@@ -1077,7 +1077,9 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		},
 		Status: capi.MachineDeploymentStatus{
-			Phase: "Running",
+			UpdatedReplicas:   3,
+			Replicas:          3,
+			AvailableReplicas: 3,
 		},
 	}
 
@@ -1106,7 +1108,9 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			},
 		},
 		Status: capi.MachineDeploymentStatus{
-			Phase: "Running",
+			UpdatedReplicas:   3,
+			Replicas:          3,
+			AvailableReplicas: 3,
 		},
 	}
 
@@ -1422,7 +1426,9 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			},
 		},
 		Status: capi.MachineDeploymentStatus{
-			Phase: "Running",
+			UpdatedReplicas:   3,
+			Replicas:          3,
+			AvailableReplicas: 3,
 		},
 	}
 
@@ -1449,6 +1455,11 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 					Version:           to.StringPtr("v1.18.2"),
 				},
 			},
+		},
+		Status: capi.MachineDeploymentStatus{
+			UpdatedReplicas:   3,
+			Replicas:          3,
+			AvailableReplicas: 3,
 		},
 	}
 
@@ -1496,8 +1507,8 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 	}
 	assert.Equal(t, "k8s-1dot18dot2-ubuntu-1804", newMachineDeployment2AzureMachineTemplate.Spec.Template.Spec.Image.Marketplace.SKU, fmt.Sprintf("Workers AzureMachineTemplate %q image shouldn't have been upgraded because another MachineDeployment is being upgraded", newMachineDeployment2AzureMachineTemplate.Name))
 
-	reconciledMachineDeployment1.Status = capi.MachineDeploymentStatus{Phase: "Running"}
-	err = ctrlClient.Update(ctx, reconciledMachineDeployment1)
+	reconciledMachineDeployment1.Status = capi.MachineDeploymentStatus{UpdatedReplicas: 0}
+	err = ctrlClient.Status().Update(ctx, reconciledMachineDeployment1)
 	if err != nil {
 		t.Fatal(err)
 	}

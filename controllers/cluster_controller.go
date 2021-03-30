@@ -25,6 +25,7 @@ import (
 	"github.com/Azure/go-autorest/autorest/to"
 	corev1 "k8s.io/api/core/v1"
 	cabpk "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/controllers/mdutil"
 
 	releaseapiextensions "github.com/giantswarm/apiextensions/pkg/apis/release/v1alpha1"
 	"github.com/giantswarm/apiextensions/pkg/label"
@@ -138,12 +139,16 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
+	logger.Info("Control Plane doesn't need to be upgraded")
+
 	// Maybe control plane was upgraded in previous reconciliation and it's not
 	// done yet, or is just having issues. Let's wait.
 	if !isReady(kcp) {
 		logger.Info("Control plane is not ready, let's wait before upgrading the workers")
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
+
+	logger.Info("Control Plane is 'Ready'")
 
 	nodesAreBeingRolled, err := r.upgradeWorkers(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
@@ -485,10 +490,10 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 
 	logger.Info("Looping through the MachineDeployments to see if they need to be upgraded", "numberOfMachineDeployments", len(clusterMachineDeployments))
 	for _, machineDeployment := range clusterMachineDeployments {
-		// If a MachineDeployment is not 'Running' we exit because we don't want to
+		// If a MachineDeployment is not completed we exit because we don't want to
 		// trigger an upgrade while something is wrong or another upgrade is in
 		// progress.
-		if machineDeployment.Status.Phase != "Running" {
+		if !mdutil.DeploymentComplete(&machineDeployment, &machineDeployment.Status) {
 			logger.Info("The MachineDeployment is being rolled. Let's wait before trying to continue upgrading machine deployments")
 			return true, nil
 		}
