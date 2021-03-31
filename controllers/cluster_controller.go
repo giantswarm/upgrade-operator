@@ -142,20 +142,20 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	// Maybe control plane was upgraded in previous reconciliation and it's not
 	// done yet, or is just having issues. Let's wait.
 	if !isReady(kcp) {
-		logger.Info("Control plane is not ready, let's wait before upgrading the workers")
+		logger.Info("Control plane is not ready, let's wait before upgrading the node pools")
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	logger.Info("Control Plane is 'Ready' and up to date. Let's check the workers")
+	logger.Info("Control Plane is 'Ready' and up to date. Let's check the node pools")
 
-	nodesAreBeingRolled, err := r.upgradeWorkers(ctx, cluster, giantswarmRelease)
+	nodesAreBeingRolled, err := r.upgradeNodepools(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	} else if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q workers", cluster.Name)
+		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q node pools", cluster.Name)
 	} else if nodesAreBeingRolled {
-		logger.Info("Worker nodes are being rolled out, let's wait before upgrading the next node pool")
+		logger.Info("Node pool nodes are being rolled out, let's wait before upgrading the next node pool")
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
@@ -511,10 +511,10 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 	return false, nil
 }
 
-// upgradeWorkers will upgrade both MachinePools and MachineDeployments.
+// upgradeNodepools will upgrade both MachinePools and MachineDeployments.
 // While it's unlikely the cluster would have both types of node pools, it's
 // still technically possible and so it is supported.
-func (r *ClusterReconciler) upgradeWorkers(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
+func (r *ClusterReconciler) upgradeNodepools(ctx context.Context, cluster *capi.Cluster, giantswarmRelease *releaseapiextensions.Release) (bool, error) {
 	machinePoolsAreBeingRolled, err := r.upgradeMachinePools(ctx, cluster, giantswarmRelease)
 	if err != nil {
 		return false, err
