@@ -71,21 +71,21 @@ var (
 	}
 	MachineImagesByK8sVersion = map[string]map[string]string{
 		"v1.18.2": {
-			"v18.4.0":  "k8s-1dot18dot2-ubuntu-1804",
-			"v18.10.0": "k8s-1dot18dot2-ubuntu-1810",
+			"18.4.0":  "k8s-1dot18dot2-ubuntu-1804",
+			"18.10.0": "k8s-1dot18dot2-ubuntu-1810",
 		},
 		"v1.18.14": {
-			"v18.4.0":  "k8s-1dot18dot14-ubuntu-1804",
-			"v18.10.0": "k8s-1dot18dot14-ubuntu-1810",
+			"18.4.0":  "k8s-1dot18dot14-ubuntu-1804",
+			"18.10.0": "k8s-1dot18dot14-ubuntu-1810",
 		},
 		"v1.18.15": {
-			"v18.4.0":  "k8s-1dot18dot15-ubuntu-1804",
-			"v18.10.0": "k8s-1dot18dot15-ubuntu-1810",
+			"18.4.0":  "k8s-1dot18dot15-ubuntu-1804",
+			"18.10.0": "k8s-1dot18dot15-ubuntu-1810",
 		},
 		"v1.18.16": {
-			"v18.4.0":  "k8s-1dot18dot16-ubuntu-1804",
-			"v18.10.0": "k8s-1dot18dot16-ubuntu-1810",
-			"v20.4.0":  "k8s-1dot18dot16-ubuntu-2004",
+			"18.4.0":  "k8s-1dot18dot16-ubuntu-1804",
+			"18.10.0": "k8s-1dot18dot16-ubuntu-1810",
+			"20.4.0":  "k8s-1dot18dot16-ubuntu-2004",
 		},
 	}
 )
@@ -249,7 +249,7 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 
 	// Create new MachineTemplate and update KubeadmControlPlane to use it, if updating k8s.
 	// Update KubeadmControlPlane label with CACP release number.
-	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
+	expectedK8sVersion := fmt.Sprintf("v%s", getComponentVersion(giantswarmRelease, "kubernetes"))
 	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
 	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
 	currentMachineImage, _, err := unstructured.NestedString(infraMachineTemplate.Object, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...)
@@ -308,7 +308,7 @@ func (r *ClusterReconciler) upgradeMachinePool(ctx context.Context, cluster *cap
 	logger.Info("Fetching infrastructure MachinePool to check its k8s version and machine image")
 
 	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
-	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
+	expectedK8sVersion := fmt.Sprintf("v%s", getComponentVersion(giantswarmRelease, "kubernetes"))
 	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
 	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
 
@@ -363,7 +363,7 @@ func (r *ClusterReconciler) upgradeMachineDeployment(ctx context.Context, cluste
 	logger := r.Log.WithValues("cluster", cluster.Name, "machineDeployment", machineDeployment.Name)
 
 	expectedCAPIVersion := getComponentVersion(giantswarmRelease, capiReleaseComponent)
-	expectedK8sVersion := getComponentVersion(giantswarmRelease, "kubernetes")
+	expectedK8sVersion := fmt.Sprintf("v%s", getComponentVersion(giantswarmRelease, "kubernetes"))
 	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
 	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
 
@@ -555,7 +555,7 @@ func getComponentVersionForInfraReference(release *releaseapiextensions.Release,
 func getComponentVersion(release *releaseapiextensions.Release, componentName string) string {
 	for _, component := range release.Spec.Components {
 		if component.Name == componentName {
-			return fmt.Sprintf("v%s", component.Version)
+			return component.Version
 		}
 	}
 
