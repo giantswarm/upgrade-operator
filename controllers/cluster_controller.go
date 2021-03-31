@@ -127,7 +127,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	controlPlaneNodesWillBeRolled, err := r.upgradeControlPlane(ctx, cluster, kcp, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
-		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q control plane", cluster.Name)
 	}
@@ -151,7 +151,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	nodesAreBeingRolled, err := r.upgradeNodepools(ctx, cluster, giantswarmRelease)
 	if apierrors.IsConflict(err) {
 		logger.Info("We received a conflict while saving objects in the k8s API. Let's try again on the next reconciliation")
-		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to upgrade Cluster %q node pools", cluster.Name)
 	} else if nodesAreBeingRolled {
