@@ -7,41 +7,29 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - bootstrap.cluster.x-k8s.io
   - cluster.x-k8s.io
+  - controlplane.cluster.x-k8s.io
+  - exp.cluster.x-k8s.io
+  - exp.infrastructure.cluster.x-k8s.io
   - infrastructure.cluster.x-k8s.io
   resources:
   - awsclusters
   - awsclusters/status
+  - awsmachinepools
+  - awsmachinepools/status
   - awsmachinetemplates
   - azureclusters
   - azureclusters/status
+  - azuremachinepools
+  - azuremachinepools/status
   - azuremachinetemplates
   - clusters
   - clusters/status
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - controlplane.cluster.x-k8s.io
-  resources:
+  - kubeadmconfigtemplates
   - kubeadmcontrolplanes
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - exp.cluster.x-k8s.io
-  - exp.infrastructure.cluster.x-k8s.io
-  resources:
-  - awsmachinepools
-  - awsmachinepools/status
-  - azuremachinepools
-  - azuremachinepools/status
+  - machinedeployments
+  - machinedeployments/status
   - machinepools
   - machinepools/status
   verbs:
