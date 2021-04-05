@@ -250,11 +250,17 @@ func (r *ClusterReconciler) upgradeControlPlane(ctx context.Context, cluster *ca
 	// Create new MachineTemplate and update KubeadmControlPlane to use it, if updating k8s.
 	// Update KubeadmControlPlane label with CACP release number.
 	expectedK8sVersion := fmt.Sprintf("v%s", getComponentVersion(giantswarmRelease, "kubernetes"))
+	expectedETCDVersion := fmt.Sprintf("v%s", getComponentVersion(giantswarmRelease, "etcd"))
 	expectedOSVersion := getComponentVersion(giantswarmRelease, "image")
 	expectedMachineImage := MachineImagesByK8sVersion[expectedK8sVersion][expectedOSVersion]
 	currentMachineImage, _, err := unstructured.NestedString(infraMachineTemplate.Object, strings.Split(KindToMachineImagePath[kcp.Spec.InfrastructureTemplate.Kind], ".")...)
 	if err != nil {
 		return false, errors.Wrapf(err, "failed to read current machine image from infrastructure machine template %q", infraMachineTemplate.GetName())
+	}
+
+	if kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageTag != expectedETCDVersion {
+		kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageTag = expectedETCDVersion
+		controlPlaneNodesWillBeRolled = true
 	}
 
 	if expectedMachineImage != currentMachineImage || expectedK8sVersion != kcp.Spec.Version {
