@@ -18,6 +18,7 @@ import (
 	capzexp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
 	cabpk "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
 	kcp "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	capiexp "sigs.k8s.io/cluster-api/exp/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/util"
@@ -50,6 +51,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachinePools(t *testing.T) {
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -88,6 +90,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachinePools(t *testing.T) {
 	}
 	assert.Equal("v1.18.14", reconciledControlplane.Spec.Version, fmt.Sprintf("KubeadmControlPlane %q has wrong k8s version in KubeadmControlPlane.Spec.Version field", reconciledControlplane.Name))
 	assert.Equal("0.3.14", reconciledControlplane.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in KubeadmControlPlane %q", CAPIWatchFilterLabel, reconciledControlplane.Name))
+	assert.Equal("v3.4.14", reconciledControlplane.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageTag, "ETCD version should be updated")
 
 	foundProviderFile := false
 	expectedProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
@@ -169,6 +172,7 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -209,6 +213,16 @@ func TestUpgradeWorkersK8sVersionWithMachinePools(t *testing.T) {
 			Version:                "v1.18.14",
 			InfrastructureTemplate: *cpAzureMachineTemplateReference,
 			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.4.14",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
 				Files: []cabpk.File{
 					{
 						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
@@ -383,6 +397,7 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -423,6 +438,16 @@ func TestMachinePoolsAreUpgradedOneAfterAnother(t *testing.T) {
 			Version:                "v1.18.14",
 			InfrastructureTemplate: *cpAzureMachineTemplateReference,
 			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.4.14",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
 				Files: []cabpk.File{
 					{
 						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
@@ -624,6 +649,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -664,6 +690,16 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 			Version:                "v1.18.2",
 			InfrastructureTemplate: *cpAzureMachineTemplateReference,
 			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.0.0",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
 				Files: []cabpk.File{
 					{
 						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
@@ -784,6 +820,11 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 				},
 			},
 		},
+		Status: capi.MachineDeploymentStatus{
+			UpdatedReplicas:   3,
+			Replicas:          3,
+			AvailableReplicas: 3,
+		},
 	}
 
 	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, workersAzureMachineTemplate, machineDeployment1)
@@ -807,6 +848,7 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 	}
 	assert.Equal("v1.18.14", reconciledControlplane.Spec.Version, fmt.Sprintf("KubeadmControlPlane %q has wrong k8s version in KubeadmControlPlane.Spec.Version field", reconciledControlplane.Name))
 	assert.Equal("0.3.14", reconciledControlplane.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in KubeadmControlPlane %q", CAPIWatchFilterLabel, reconciledControlplane.Name))
+	assert.Equal("v3.4.14", reconciledControlplane.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageTag, "ETCD version should be updated")
 
 	foundCPProviderFile := false
 	expectedCPProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
@@ -879,6 +921,236 @@ func TestUpgradeControlPlaneK8sVersionWithMachineDeployments(t *testing.T) {
 	assert.Equal("0.4.12", reconciledAzureCluster.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in AzureCluster %q", CAPIWatchFilterLabel, reconciledAzureCluster.Name))
 }
 
+func TestUpgradeETCDVersion(t *testing.T) {
+	assert := assert.New(t)
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = capi.AddToScheme(scheme)
+	_ = capiexp.AddToScheme(scheme)
+	_ = capz.AddToScheme(scheme)
+	_ = capzexp.AddToScheme(scheme)
+	_ = kcp.AddToScheme(scheme)
+	_ = cabpk.AddToScheme(scheme)
+	_ = releaseapiextensions.AddToScheme(scheme)
+
+	release10dot0 := &releaseapiextensions.Release{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "v10.0.0",
+		},
+		Spec: releaseapiextensions.ReleaseSpec{
+			Components: []releaseapiextensions.ReleaseSpecComponent{
+				{Name: "kubernetes", Version: "1.18.2"},
+				{Name: capiReleaseComponent, Version: "0.3.14"},
+				{Name: cacpReleaseComponent, Version: "0.3.14"},
+				{Name: capzReleaseComponent, Version: "0.4.12"},
+				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
+			},
+		},
+	}
+
+	cpAzureMachineTemplate := &capz.AzureMachineTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster-control-plane-1a2b3c",
+			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
+		},
+		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
+			Image: &capz.Image{
+				Marketplace: &capz.AzureMarketplaceImage{
+					Publisher: "cncf-upstream",
+					Offer:     "capi",
+					SKU:       "k8s-1dot18dot2-ubuntu-1804",
+					Version:   "latest",
+				},
+			},
+		}}},
+	}
+	cpAzureMachineTemplateReference, err := reference.GetReference(scheme, cpAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kubeadmcontrolplane := &kcp.KubeadmControlPlane{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster-control-plane-1-18-2",
+			Labels: map[string]string{
+				cacpReleaseComponent:  "v0.3.10",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: kcp.KubeadmControlPlaneSpec{
+			Replicas:               to.Int32Ptr(1),
+			Version:                "v1.18.2",
+			InfrastructureTemplate: *cpAzureMachineTemplateReference,
+			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.0.0",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
+				Files: []cabpk.File{
+					{
+						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
+					},
+				},
+			},
+		},
+		Status: kcp.KubeadmControlPlaneStatus{
+			Conditions: capi.Conditions{capi.Condition{
+				Type:   capi.ReadyCondition,
+				Status: corev1.ConditionTrue,
+			}},
+		},
+	}
+
+	kcpReference, err := reference.GetReference(scheme, kubeadmcontrolplane)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	azureCluster := &capz.AzureCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster",
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "0.4.10",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: capz.AzureClusterSpec{
+			ResourceGroup: "",
+		},
+	}
+	azureClusterReference, err := reference.GetReference(scheme, azureCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster := &capi.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "my-cluster",
+			Labels: map[string]string{
+				apiextensionslabel.ReleaseVersion: "v10.0.0",
+				CAPIWatchFilterLabel:              "0.3.10",
+			},
+		},
+		Spec: capi.ClusterSpec{
+			ControlPlaneRef:   kcpReference,
+			InfrastructureRef: azureClusterReference,
+		},
+	}
+
+	workersAzureMachineTemplate := &capz.AzureMachineTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "md01-1a2b3c",
+			Labels:    map[string]string{capi.ClusterLabelName: "my-cluster"},
+		},
+		Spec: capz.AzureMachineTemplateSpec{Template: capz.AzureMachineTemplateResource{Spec: capz.AzureMachineSpec{
+			Image: &capz.Image{
+				Marketplace: &capz.AzureMarketplaceImage{
+					Publisher: "cncf-upstream",
+					Offer:     "capi",
+					SKU:       "k8s-1dot18dot2-ubuntu-1804",
+					Version:   "latest",
+				},
+			},
+		}}},
+	}
+	workersAzureMachineTemplateReference, err := reference.GetReference(scheme, workersAzureMachineTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kubeadmconfigTemplate := &cabpk.KubeadmConfigTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "md01",
+		},
+		Spec: cabpk.KubeadmConfigTemplateSpec{
+			Template: cabpk.KubeadmConfigTemplateResource{
+				Spec: cabpk.KubeadmConfigSpec{
+					Files: []cabpk.File{
+						{
+							ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", workersAzureMachineTemplate.Name)}},
+						},
+					},
+				},
+			},
+		},
+	}
+	kubeadmconfigTemplateReference, err := reference.GetReference(scheme, kubeadmconfigTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	machineDeployment1 := &capi.MachineDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "md01",
+			Labels: map[string]string{
+				CAPIWatchFilterLabel:  "0.3.10",
+				capi.ClusterLabelName: "my-cluster",
+			},
+		},
+		Spec: capi.MachineDeploymentSpec{
+			ClusterName: cluster.Name,
+			Replicas:    to.Int32Ptr(3),
+			Template: capi.MachineTemplateSpec{
+				ObjectMeta: capi.ObjectMeta{},
+				Spec: capi.MachineSpec{
+					ClusterName: cluster.Name,
+					Bootstrap: capi.Bootstrap{
+						ConfigRef: kubeadmconfigTemplateReference,
+					},
+					InfrastructureRef: *workersAzureMachineTemplateReference,
+					Version:           to.StringPtr("v1.18.2"),
+				},
+			},
+		},
+		Status: capi.MachineDeploymentStatus{
+			UpdatedReplicas:   3,
+			Replicas:          3,
+			AvailableReplicas: 3,
+		},
+	}
+
+	ctrlClient := fake.NewFakeClientWithScheme(scheme, release10dot0, cpAzureMachineTemplate, kubeadmcontrolplane, azureCluster, cluster, kubeadmconfigTemplate, workersAzureMachineTemplate, machineDeployment1)
+
+	reconciler := ClusterReconciler{
+		Client: ctrlClient,
+		Log:    ctrl.Log.WithName("controllers").WithName("Cluster"),
+		Scheme: scheme,
+	}
+
+	_, err = reconciler.Reconcile(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "my-cluster"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reconciledControlplane := &kcp.KubeadmControlPlane{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: kubeadmcontrolplane.Namespace, Name: kubeadmcontrolplane.Name}, reconciledControlplane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal("v3.4.14", reconciledControlplane.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageTag, "ETCD version should be updated")
+
+	reconciledMachineDeployment1 := &capi.MachineDeployment{}
+	err = ctrlClient.Get(ctx, client.ObjectKey{Namespace: machineDeployment1.Namespace, Name: machineDeployment1.Name}, reconciledMachineDeployment1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal("0.3.10", reconciledMachineDeployment1.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q got updated in MachineDeployment %q but shouldn't because control plane is being upgraded", CAPIWatchFilterLabel, reconciledMachineDeployment1.Name))
+}
+
 func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 	assert := assert.New(t)
 
@@ -903,6 +1175,7 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -943,6 +1216,16 @@ func TestUpgradeWorkersK8sVersionWithMachineDeployments(t *testing.T) {
 			Version:                "v1.18.14",
 			InfrastructureTemplate: *cpAzureMachineTemplateReference,
 			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.4.14",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
 				Files: []cabpk.File{
 					{
 						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
@@ -1254,6 +1537,7 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.4.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -1294,6 +1578,16 @@ func TestMachineDeploymentIsNotUpgradedIfThereAreNotReadyMachineDeployments(t *t
 			Version:                "v1.18.14",
 			InfrastructureTemplate: *cpAzureMachineTemplateReference,
 			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.4.14",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
 				Files: []cabpk.File{
 					{
 						ContentFrom: &cabpk.FileSource{Secret: cabpk.SecretFileSource{Name: fmt.Sprintf("%s-azure-json", cpAzureMachineTemplate.Name)}},
@@ -1566,6 +1860,7 @@ func TestUpgradeControlPlaneOSVersionWithMachinePools(t *testing.T) {
 				{Name: cacpReleaseComponent, Version: "0.3.14"},
 				{Name: capzReleaseComponent, Version: "0.4.12"},
 				{Name: "image", Version: "18.10.0"},
+				{Name: "etcd", Version: "3.4.14"},
 			},
 		},
 	}
@@ -1604,6 +1899,7 @@ func TestUpgradeControlPlaneOSVersionWithMachinePools(t *testing.T) {
 	}
 	assert.Equal("v1.18.2", reconciledControlplane.Spec.Version, "Kubeadmcontrolplane.Spec.Version uses wrong k8s version")
 	assert.Equal("0.3.14", reconciledControlplane.Labels[CAPIWatchFilterLabel], fmt.Sprintf("Label %q is wrong in KubeadmControlPlane %q", CAPIWatchFilterLabel, reconciledControlplane.Name))
+	assert.Equal("v3.4.14", reconciledControlplane.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageTag, "ETCD version should be updated")
 
 	foundProviderFile := false
 	expectedProviderFile := fmt.Sprintf("%s-azure-json", reconciledControlplane.Spec.InfrastructureTemplate.Name)
@@ -1671,6 +1967,18 @@ func newKubeadmControlPlane(cluster string) *kcp.KubeadmControlPlane {
 		Spec: kcp.KubeadmControlPlaneSpec{
 			Replicas: to.Int32Ptr(1),
 			Version:  "v1.18.2",
+			KubeadmConfigSpec: cabpk.KubeadmConfigSpec{
+				ClusterConfiguration: &v1beta1.ClusterConfiguration{
+					Etcd: v1beta1.Etcd{
+						Local: &v1beta1.LocalEtcd{
+							ImageMeta: v1beta1.ImageMeta{
+								ImageTag: "v3.0.0",
+							},
+							DataDir: "/var/lib/etcddisk/etcd",
+						},
+					},
+				},
+			},
 		},
 		Status: kcp.KubeadmControlPlaneStatus{
 			Conditions: capi.Conditions{capi.Condition{
