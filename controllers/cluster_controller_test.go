@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake" //nolint:staticcheck // < v0.7.0 has a deprecation on pkg/client/fake that was removed in later versions
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 

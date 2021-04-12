@@ -457,18 +457,19 @@ func (r *ClusterReconciler) upgradeMachinePools(ctx context.Context, cluster *ca
 		return false, err
 	}
 
-	for _, machinePool := range clusterMachinePools {
+	for idx := range clusterMachinePools {
+		machinePool := &clusterMachinePools[idx]
 		logger := r.Log.WithValues("cluster", cluster.Name, "machinepool", machinePool.Name)
 
 		// If a MachinePool is not ready we exit because we don't want to
 		// trigger an upgrade while something is wrong or another upgrade is in
 		// progress.
-		if !isReady(&machinePool) {
+		if !isReady(machinePool) {
 			logger.Info("The MachinePool is not ready. Let's wait before trying to continue upgrading machine pools")
 			return true, nil
 		}
 
-		nodesWillBeRolled, err := r.upgradeMachinePool(ctx, cluster, &machinePool, giantswarmRelease)
+		nodesWillBeRolled, err := r.upgradeMachinePool(ctx, cluster, machinePool, giantswarmRelease)
 		if err != nil {
 			return false, err
 		}
@@ -493,16 +494,17 @@ func (r *ClusterReconciler) upgradeMachineDeployments(ctx context.Context, clust
 	}
 
 	logger.Info("Looping through the MachineDeployments to see if they need to be upgraded", "numberOfMachineDeployments", len(clusterMachineDeployments))
-	for _, machineDeployment := range clusterMachineDeployments {
+	for idx := range clusterMachineDeployments {
+		machineDeployment := &clusterMachineDeployments[idx]
 		// If a MachineDeployment is not completed we exit because we don't want to
 		// trigger an upgrade while something is wrong or another upgrade is in
 		// progress.
-		if !mdutil.DeploymentComplete(&machineDeployment, &machineDeployment.Status) {
+		if !mdutil.DeploymentComplete(machineDeployment, &machineDeployment.Status) {
 			logger.Info("MachineDeployment is currently being rolled", "machineDeployment", machineDeployment.Name)
 			return true, nil
 		}
 
-		waitBeforeUpgradingNext, err := r.upgradeMachineDeployment(ctx, cluster, &machineDeployment, giantswarmRelease)
+		waitBeforeUpgradingNext, err := r.upgradeMachineDeployment(ctx, cluster, machineDeployment, giantswarmRelease)
 		if err != nil {
 			return false, err
 		}
