@@ -14,7 +14,7 @@ require (
 	k8s.io/apiserver v0.17.14
 	k8s.io/client-go v0.17.14
 	k8s.io/klog v1.0.0
-	sigs.k8s.io/cluster-api v0.3.14
+	sigs.k8s.io/cluster-api v0.3.17
 	sigs.k8s.io/cluster-api-provider-azure v0.4.12
 	sigs.k8s.io/controller-runtime v0.5.14
 )
